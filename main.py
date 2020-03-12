@@ -1,26 +1,29 @@
 import math
 import autoencoder_simple
 import clustering_k_means
+import data_processor as _dp
 import vamb_tools
 import matplotlib.pyplot as plt
 import datetime
+import multiprocessing as _multiprocessing
+import numpy as np
+from tensorflow import keras
 
 if __name__ == '__main__':
+    _multiprocessing.freeze_support() # Skal være her så længe at vi bruger vambs metode til at finde depth
 
-    print(datetime.datetime.now())
 
-    with vamb_tools.Reader('C:/Users/M0107/Desktop/p10/Bin.gz', 'rb') as filehandle:
-        tnfs, contigname, lengths = vamb_tools.read_contigs(filehandle, minlength=4)
-
-    print(datetime.datetime.now())
+    #tnfs = _dp.get_tnfs()
+    #np.save('tnfs.npy', tnfs)
+    tnfs = np.load('tnfs.npy')
 
     split_length = math.floor(len(tnfs) * 0.8)
-
     train = tnfs[:split_length, :]
     val = tnfs[split_length + 1:, :]
 
     AE = autoencoder_simple.stacked_autoencoder(train=train, valid=val)
-    history = AE.train(number_of_epoch=10)
+    history = AE.train(number_of_epoch=5000, loss_funciton=keras.losses.mean_absolute_error)
+
 
 
     # Plot training & validation accuracy values
@@ -40,5 +43,3 @@ if __name__ == '__main__':
     plt.xlabel('Epoch')
     plt.legend(['Train', 'Test'], loc='upper left')
     plt.show()
-
-    print('end')

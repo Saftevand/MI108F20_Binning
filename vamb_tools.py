@@ -73,8 +73,8 @@ def read_contigs(filehandle, minlength=100, preallocate=False):
         file=_sys.stderr)
 
     tnfs = PushArray(_np.float32)
-    lengths = PushArray(_np.int)
-    contignames = list()
+    #lengths = PushArray(_np.int)
+    #contignames = list()
 
     entries = byte_iterfasta(filehandle)
 
@@ -83,13 +83,13 @@ def read_contigs(filehandle, minlength=100, preallocate=False):
             continue
 
         tnfs.extend(entry.fourmer_freq())
-        lengths.append(len(entry))
-        contignames.append(entry.header)
+        #lengths.append(len(entry))
+        #contignames.append(entry.header)
 
     tnfs_arr = tnfs.take().reshape(-1, 136)
-    lengths_arr = lengths.take()
+    #lengths_arr = lengths.take()
 
-    return tnfs_arr, contignames, lengths_arr
+    return tnfs_arr#, contignames, lengths_arr
 
 class PushArray:
     __slots__ = ['data', 'capacity', 'length']
