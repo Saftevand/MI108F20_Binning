@@ -10,7 +10,7 @@ class stacked_autoencoder():
 
     def _encoder(self):
         stacked_encoder = keras.models.Sequential([
-            keras.layers.Dense(119, activation="selu", input_shape=[136,], kernel_initializer=keras.initializers.lecun_normal()),
+            keras.layers.Dense(119, activation="selu", input_shape=[139,], kernel_initializer=keras.initializers.lecun_normal()),
             keras.layers.Dense(102, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
             keras.layers.Dense(85, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
             keras.layers.Dense(68, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
@@ -25,10 +25,10 @@ class stacked_autoencoder():
             keras.layers.Dense(85, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
             keras.layers.Dense(102, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
             keras.layers.Dense(119, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
-            keras.layers.Dense(136, activation="sigmoid", kernel_initializer=keras.initializers.RandomNormal), ])
+            keras.layers.Dense(139, activation="sigmoid", kernel_initializer=keras.initializers.RandomNormal), ])
         return stacked_decoder
 
-    def train(self, loss_funciton=keras.losses.binary_crossentropy, optimizer_=keras.optimizers.SGD(lr=1.5), number_of_epoch=10):
+    def train(self, loss_funciton=keras.losses.binary_crossentropy, optimizer_=keras.optimizers.SGD(lr=0.75), number_of_epoch=10):
         stacked_ae = keras.models.Sequential([self._encoder(), self._decoder()])
         stacked_ae.compile(loss=loss_funciton,
                            optimizer=optimizer_,
