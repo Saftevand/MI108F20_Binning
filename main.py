@@ -8,27 +8,55 @@ import datetime
 import multiprocessing as _multiprocessing
 import numpy as np
 from tensorflow import keras
+from sklearn.preprocessing import normalize
+from sklearn.manifold import TSNE
+import seaborn as sns
 
 if __name__ == '__main__':
     _multiprocessing.freeze_support() # Skal være her så længe at vi bruger vambs metode til at finde depth
 
+    use_depth = False
+    load_data = True
     #simon_stationær_path = 'C:/Users/Simon/Documents/GitHub/MI108F20_Binning/test/Bin.gz'
 
-    #tnfs = _dp.get_tnfs(simon_stationær_path)
-    #np.save('tnfs.npy', tnfs)
-    tnfs = np.load('tnfs.npy')
+    if(use_depth):
+        if(load_data):
+            tnfs = np.load('vamb_tnfs.npy')
+            depth = np.load('vamb_depths.npy')
+        else:
+            tnfs = _dp.get_tnfs()
+            depth = _dp.get_depth()
+        norm_depth = normalize(depth, axis=1, norm='l1')
+        input_array = np.hstack([tnfs, norm_depth])
+        split_length = math.floor(len(input_array) * 0.8)
+        train = input_array[:split_length, :]
+        val = input_array[split_length + 1:, :]
+    else:
+        if (load_data):
+            tnfs = np.load('vamb_tnfs.npy')
+        else:
+            tnfs = _dp.get_tnfs()
+        split_length = math.floor(len(tnfs) * 0.8)
+        train = tnfs[:split_length, :]
+        val = tnfs[split_length + 1:, :]
 
-    split_length = math.floor(len(tnfs) * 0.8)
-    train = tnfs[:split_length, :]
-    val = tnfs[split_length + 1:, :]
+    AE = autoencoder_simple.stacked_autoencoder(train=train, valid=val, input_layer_size=len(train[0]))
+    history, model = AE.train(number_of_epoch=1)
 
-    #AE = autoencoder_simple.stacked_autoencoder(train=train, valid=val)
-    #AE = autoencoder_simple.DEC_autoencoder(train=train, valid=val)
+    test = AE.encoder.predict(tnfs)
+    k_means = clustering_k_means.clustering_k_means(k_clusters=5)
 
     AE = autoencoder_simple.DEC_greedy_autoencoder(train=train, valid=val)
     history = AE.greedy_pretraining(loss_function=keras.losses.mean_absolute_error, pretrain_epochs=50, finetune_epochs=200, lr=0.1, neuron_list=[500, 500, 2000, 10], input_shape=136, dropout_rate=0.2)
+    k_means.do_clustering(dataset=test, max_iterations=5)
 
-    #history = AE.train(number_of_epoch=500, loss_funciton=keras.losses.mean_absolute_error)
+    #tsned = TSNE(n_components=2).fit_transform(k_means.clustered_data)
+    #plt.figure(figsize=(16,10))
+    #sns.scatterplot(hue='y',
+    #                palette=sns.color_palette("hls", 10),
+    #                data=k_means.clustered_data,
+    #                legend="full",
+    #                alpha=0.3)
 
 
 
