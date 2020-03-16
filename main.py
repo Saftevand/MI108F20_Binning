@@ -12,8 +12,9 @@ from tensorflow import keras
 if __name__ == '__main__':
     _multiprocessing.freeze_support() # Skal være her så længe at vi bruger vambs metode til at finde depth
 
+    #simon_stationær_path = 'C:/Users/Simon/Documents/GitHub/MI108F20_Binning/test/Bin.gz'
 
-    #tnfs = _dp.get_tnfs()
+    #tnfs = _dp.get_tnfs(simon_stationær_path)
     #np.save('tnfs.npy', tnfs)
     tnfs = np.load('tnfs.npy')
 
@@ -21,8 +22,13 @@ if __name__ == '__main__':
     train = tnfs[:split_length, :]
     val = tnfs[split_length + 1:, :]
 
-    AE = autoencoder_simple.stacked_autoencoder(train=train, valid=val)
-    history = AE.train(number_of_epoch=5000, loss_funciton=keras.losses.mean_absolute_error)
+    #AE = autoencoder_simple.stacked_autoencoder(train=train, valid=val)
+    #AE = autoencoder_simple.DEC_autoencoder(train=train, valid=val)
+
+    AE = autoencoder_simple.DEC_greedy_autoencoder(train=train, valid=val)
+    history = AE.greedy_pretraining(loss_function=keras.losses.mean_absolute_error, pretrain_epochs=50, finetune_epochs=200, lr=0.1, neuron_list=[500, 500, 2000, 10], input_shape=136, dropout_rate=0.2)
+
+    #history = AE.train(number_of_epoch=500, loss_funciton=keras.losses.mean_absolute_error)
 
 
 
@@ -43,3 +49,11 @@ if __name__ == '__main__':
     plt.xlabel('Epoch')
     plt.legend(['Train', 'Test'], loc='upper left')
     plt.show()
+
+    ref1 = train[0]
+    res = AE.predict(train)
+
+    print(f'correct: {ref1[0]}, \n predict: {res[0]} \n \n')
+
+    ref2 = [train[1]]
+    print(f'correct: {ref2[0]}, \n predict: {res[1]}')
