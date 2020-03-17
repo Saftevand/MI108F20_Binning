@@ -30,6 +30,7 @@ if __name__ == '__main__':
 
     use_depth = False
     load_data = True
+    #simon_stationær_path = 'C:/Users/Simon/Documents/GitHub/MI108F20_Binning/test/Bin.gz'
 
     if (use_depth):
         if (load_data):
@@ -58,6 +59,8 @@ if __name__ == '__main__':
     test = AE.encoder.predict(train)
     k_means = clustering_k_means.clustering_k_means(k_clusters=5)
 
+    AE = autoencoder_simple.DEC_greedy_autoencoder(train=train, valid=val)
+    history = AE.greedy_pretraining(loss_function=keras.losses.mean_absolute_error, pretrain_epochs=50, finetune_epochs=200, lr=0.1, neuron_list=[500, 500, 2000, 10], input_shape=136, dropout_rate=0.2)
     k_means.do_clustering(dataset=test, max_iterations=5)
 
     data = k_means.clustered_data
@@ -81,3 +84,11 @@ if __name__ == '__main__':
     plt.xlabel('Epoch')
     plt.legend(['Train', 'Test'], loc='upper left')
     plt.show()
+
+    ref1 = train[0]
+    res = AE.predict(train)
+
+    print(f'correct: {ref1[0]}, \n predict: {res[0]} \n \n')
+
+    ref2 = [train[1]]
+    print(f'correct: {ref2[0]}, \n predict: {res[1]}')
