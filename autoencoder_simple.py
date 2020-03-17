@@ -86,25 +86,30 @@ class DEC_greedy_autoencoder():
     def __init__(self, train, valid):
         self.x_train = train
         self.x_valid = valid
-        self.model = None
+        self.autoencoder = None
+        self.encoder = None
+
+    def encode(self, data):
+        if self.encoder is None:
+            print("No encoder has been trained!")
+            return None
+        else:
+            return self.encoder.predict(data)
 
     def predict(self, data):
         return self.model.predict(data)
 
-    def greedy_pretraining(self, loss_function=keras.losses.binary_crossentropy, lr=0.1, finetune_epochs=100000, pretrain_epochs=50000, neuron_list=[500,500,2000,10], input_shape=136, dropout_rate=0.2):
-        #https://machinelearningmastery.com/greedy-layer-wise-pretraining-tutorial/
+    def greedy_pretraining(self, loss_function=keras.losses.binary_crossentropy, lr=0.1, finetune_epochs=100000, pretrain_epochs=50000, neuron_list=[500,500,2000,10], input_shape=136, dropout_rate=0.2, verbose=1):
 
-        print("Adding and training first layer")
+        print(f'Adding and training first layer for {pretrain_epochs} epochs')
 
         neurons_first_layer = neuron_list.pop(0)
 
+        # Create first Encoder decoder pair
         input = keras.layers.Input(shape=(input_shape,))
-
         dropout_out = keras.layers.Dropout(dropout_rate)(input)
-
         enc_layer = keras.layers.Dense(neurons_first_layer, activation='selu',input_shape=[input_shape], kernel_initializer=keras.initializers.lecun_normal())
         enc_out = enc_layer(dropout_out)
-
         dec_layer = keras.layers.Dense(input_shape, activation='selu',input_shape=[neurons_first_layer], kernel_initializer=keras.initializers.lecun_normal())
         dec_out = dec_layer(enc_out)
 
@@ -112,36 +117,45 @@ class DEC_greedy_autoencoder():
 
         model.compile(loss=loss_function, optimizer=keras.optimizers.SGD(lr), metrics=['accuracy'])
 
-        model.fit(x=self.x_train, y=self.x_train, epochs=pretrain_epochs, validation_data=[self.x_valid, self.x_valid])
+        model.fit(x=self.x_train, y=self.x_train, epochs=pretrain_epochs, validation_data=[self.x_valid, self.x_valid], verbose=verbose)
 
         decoder_layer_list = [dec_layer]
 
         enc_out = enc_layer(input)
         trained_encoder = keras.models.Model(inputs=input, outputs=enc_out)
 
-
-        full_model = self.add_and_fit_layers(loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list, dropout_rate, trained_encoder, input)
+        # add and train more layers
+        full_model = self.add_and_fit_layers(loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list, dropout_rate, trained_encoder, input, verbose)
 
         #finetune_model and return history
 
         print(f'Finetuning final model for {finetune_epochs} epochs')
 
-        history = full_model.fit(x=self.x_train, y=self.x_train, epochs=finetune_epochs, validation_data=[self.x_valid, self.x_valid], batch_size=256)
+        history = full_model.fit(x=self.x_train, y=self.x_train, epochs=finetune_epochs, validation_data=[self.x_valid, self.x_valid], batch_size=256, verbose=verbose)
 
-        self.model = full_model
+
+        #Saving full autoencoder because why not?
+        self.autoencoder = keras.models.clone_model(full_model)
+        self.autoencoder.set_weights(full_model.get_weights())
+        self.autoencoder.compile(loss=loss_function, optimizer=keras.optimizers.SGD(lr), metrics=['accuracy'])
+
+        #extract encoder from autoencoder
+        out = full_model.layers[1](input)
+        full_encoder = keras.models.Model(inputs=input, outputs=out)
+        full_encoder.compile(loss=loss_function, optimizer=keras.optimizers.SGD(lr), metrics=['accuracy'])
+
+        self.encoder = full_encoder
 
         return history
 
-
-
-    def add_and_fit_layers(self, loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list, dropout_rate, current_encoder_stack, input):
+    def add_and_fit_layers(self, loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list, dropout_rate, current_encoder_stack, input, verbose):
 
         which_layer = len(neuron_list)
 
         if which_layer == 0:
             return self.combine_encoder_decoder(current_encoder_stack, decoder_layer_list, input, loss_function, lr)
 
-        print("Adding and training another layer")
+        print(f'Adding and training another layer for {pretrain_epochs} epochs')
 
         # encode data using already trained encoders. Creates data used for training following layers
         encoded_data_train = current_encoder_stack.predict(self.x_train)
@@ -175,7 +189,7 @@ class DEC_greedy_autoencoder():
 
         model.compile(loss=loss_function, optimizer=keras.optimizers.SGD(lr), metrics=['accuracy'])
 
-        model.fit(x=encoded_data_train, y=encoded_data_train, epochs=pretrain_epochs, validation_data=[encoded_data_valid, encoded_data_valid])
+        model.fit(x=encoded_data_train, y=encoded_data_train, epochs=pretrain_epochs, validation_data=[encoded_data_valid, encoded_data_valid], verbose=verbose)
 
         #puts in the opposite end of append()
         decoder_layer_list.insert(0, new_dec_layer)
@@ -188,8 +202,7 @@ class DEC_greedy_autoencoder():
         #skal man compile her?
         model.compile(loss=loss_function, optimizer=keras.optimizers.SGD(lr), metrics=['accuracy'])
 
-        return self.add_and_fit_layers(loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list, dropout_rate, model, input)
-
+        return self.add_and_fit_layers(loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list, dropout_rate, model, input, verbose)
 
     def combine_encoder_decoder(self, encoder, decoder_layers, input, loss_function, lr):
 
