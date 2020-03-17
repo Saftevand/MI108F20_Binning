@@ -1,89 +1,35 @@
-import math
-import autoencoder_simple
-import clustering_k_means
-import data_processor as _dp
-import vamb_tools
-import matplotlib.pyplot as plt
-import datetime
+import autoencoders
+import clustering_methods
 import multiprocessing as _multiprocessing
-import numpy as np
 from tensorflow import keras
-from sklearn.preprocessing import normalize
-from sklearn.manifold import TSNE
-import seaborn as sns
+import data_processor
+import Visualizer
 
-def visualize(data, colors=None):
-    if colors is None:
-        colors = ['bo', 'ro', 'go', 'mo', 'ko', 'co', 'mo', 'yo', 'bx', 'rx', 'gx', 'mx', 'kx', 'cx', 'mx', 'yx',
-                  'bv', 'rv', 'gv', 'mv', 'kv', 'cv', 'mv', 'yv', 'bs', 'rs', 'gs', 'ms', 'ks', 'cs', 'ms', 'ys',
-                  'bp', 'rp', 'gp', 'mp', 'kp', 'cp', 'mp', 'yp', 'b+', 'r+', 'g+', 'm+', 'k+', 'c+', 'm+', 'y+']
-    for i in range(0, data.axes[0].stop):
-        for j in range(0, data.axes[1].stop):
-            if (data[j][i] is not None):
-                plt.plot(data[j][i][0], data[j][i][1], colors[i])
-            # print(data[j][i])
-    plt.show()
+
 
 
 if __name__ == '__main__':
     _multiprocessing.freeze_support()  # Skal være her så længe at vi bruger vambs metode til at finde depth
 
-    use_depth = False
-    load_data = True
-    #simon_stationær_path = 'C:/Users/Simon/Documents/GitHub/MI108F20_Binning/test/Bin.gz'
+    dp = data_processor.Data_processor()
 
-    if (use_depth):
-        if (load_data):
-            tnfs = np.load('vamb_tnfs.npy')
-            depth = np.load('vamb_depths.npy')
-        else:
-            tnfs = _dp.get_tnfs()
-            depth = _dp.get_depth()
-        norm_depth = normalize(depth, axis=1, norm='l1')
-        input_array = np.hstack([tnfs, norm_depth])
-        split_length = math.floor(len(input_array) * 0.8)
-        train = input_array[:split_length, :]
-        val = input_array[split_length + 1:, :]
-    else:
-        if (load_data):
-            tnfs = np.load('vamb_tnfs.npy')
-        else:
-            tnfs = _dp.get_tnfs()
-        split_length = math.floor(len(tnfs) * 0.8)
-        train = tnfs[:split_length, :]
-        val = tnfs[split_length + 1:, :]
+    train, val = dp.get_train_and_validation_data()
 
-    AE = autoencoder_simple.stacked_autoencoder(train=train, valid=val, input_layer_size=len(train[0]))
-    history, model = AE.train(number_of_epoch=5)
+    #AE = autoencoders.Stacked_autoencoder(train=train, valid=val, input_layer_size=len(train[0]))
+    #history, model = AE.train(number_of_epoch=5)
 
-    test = AE.encoder.predict(train)
-    k_means = clustering_k_means.clustering_k_means(k_clusters=5)
+    #test = AE.encoder.predict(train)
+    k_means = clustering_methods.clustering_k_means(k_clusters=5)
 
-    AE = autoencoder_simple.DEC_greedy_autoencoder(train=train, valid=val)
+    AE = autoencoders.DEC_greedy_autoencoder(train=train, valid=val)
     history = AE.greedy_pretraining(loss_function=keras.losses.mean_absolute_error, pretrain_epochs=50, finetune_epochs=200, lr=0.1, neuron_list=[500, 500, 2000, 10], input_shape=136, dropout_rate=0.2)
+    test = AE.predict(train)
     k_means.do_clustering(dataset=test, max_iterations=5)
 
     data = k_means.clustered_data
 
-    visualize(data)
+    Visualizer.training_graphs(history=history)
 
-    # Plot training & validation accuracy values
-    plt.plot(history.history['accuracy'])
-    plt.plot(history.history['val_accuracy'])
-    plt.title('Model accuracy')
-    plt.ylabel('Accuracy')
-    plt.xlabel('Epoch')
-    plt.legend(['Train', 'Test'], loc='upper left')
-    plt.show()
-
-    # Plot training & validation loss values
-    plt.plot(history.history['loss'])
-    plt.plot(history.history['val_loss'])
-    plt.title('Model loss')
-    plt.ylabel('Loss')
-    plt.xlabel('Epoch')
-    plt.legend(['Train', 'Test'], loc='upper left')
-    plt.show()
 
     ref1 = train[0]
     res = AE.predict(train)
