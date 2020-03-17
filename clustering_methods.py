@@ -2,13 +2,22 @@ import numpy as np
 from random import randint
 import math
 import pandas as pd
+import abc
+
+
+class clustering_method():
+    @abc.abstractmethod
+    def do_clustering(self, dataset, max_iterations=5):
+        pass
+
 
 class clustering_element():
     def __init__(self, cluster, element):
         self.cluster = cluster
         self.element = element
 
-class clustering_k_means():
+
+class clustering_k_means(clustering_method):
     def __init__(self, k_clusters=10):
         self.k = k_clusters
         self.centroids = []
@@ -81,7 +90,7 @@ class clustering_k_means():
         clusters = []
 
         for i in range(0, self.k):
-            current_cluster= []
+            current_cluster = []
             points_in_cluster = filter(lambda x: x.cluster == i, prep_dataset)
             for j in points_in_cluster:
                 current_cluster.append(j.element)

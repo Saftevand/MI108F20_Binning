@@ -1,11 +1,23 @@
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
+import abc
 
 
-class stacked_autoencoder():
+class Autoencoder:
+    def __init__(self, train, valid):
+        self.x_train = train
+        self.x_valid = valid
+
+    @abc.abstractmethod
+    def extract_features(self, feature_matrix):
+        pass
+
+
+class Stacked_autoencoder(Autoencoder):
 
     def __init__(self, train, valid, input_layer_size):
+        super().__init__(train, valid)
         self.x_train = train
         self.x_valid = valid
         self._input_layer_size = input_layer_size
@@ -13,7 +25,7 @@ class stacked_autoencoder():
         self.decoder = None
 
     def _encoder(self):
-        if (self.encoder != None):
+        if (self.encoder is not None):
             return self.encoder
 
         stacked_encoder = keras.models.Sequential([
@@ -24,7 +36,7 @@ class stacked_autoencoder():
         return stacked_encoder
 
     def _decoder(self):
-        if (self.decoder != None):
+        if (self.decoder is not None):
             return self.decoder
 
         stacked_decoder = keras.models.Sequential([
@@ -46,10 +58,14 @@ class stacked_autoencoder():
         print('Training ended')
         return history, stacked_ae
 
+    def extract_features(self, feature_matrix):
+        return self.encoder.predict()
 
-class DEC_autoencoder():
+
+class DEC_autoencoder(Autoencoder):
 
     def __init__(self, train, valid):
+        super().__init__(train, valid)
         self.x_train = train
         self.x_valid = valid
 
@@ -81,9 +97,10 @@ class DEC_autoencoder():
         return history
 
 
-class DEC_greedy_autoencoder():
+class DEC_greedy_autoencoder(Autoencoder):
 
     def __init__(self, train, valid):
+        super().__init__(train, valid)
         self.x_train = train
         self.x_valid = valid
         self.model = None
