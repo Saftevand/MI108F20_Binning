@@ -13,6 +13,10 @@ class Autoencoder:
     def extract_features(self, feature_matrix):
         pass
 
+    @abc.abstractmethod
+    def train(self):
+        pass
+
 
 class Stacked_autoencoder(Autoencoder):
 
@@ -106,7 +110,7 @@ class DEC_greedy_autoencoder(Autoencoder):
         self.autoencoder = None
         self.encoder = None
 
-    def encode(self, data):
+    def extract_features(self, data):
         if self.encoder is None:
             print("No encoder has been trained!")
             return None
@@ -116,7 +120,10 @@ class DEC_greedy_autoencoder(Autoencoder):
     def predict(self, data):
         return self.model.predict(data)
 
-    def greedy_pretraining(self, loss_function=keras.losses.binary_crossentropy, lr=0.1, finetune_epochs=100000, pretrain_epochs=50000, neuron_list=[500,500,2000,10], input_shape=136, dropout_rate=0.2, verbose=1):
+    def greedy_pretraining(self, loss_function=keras.losses.binary_crossentropy, lr=0.01, finetune_epochs=5000, pretrain_epochs=2000, neuron_list=[500,500,2000,10], input_shape=None,  dropout_rate=0.2, verbose=0):
+        if input_shape is None:
+            input_shape = len(self.x_train[0])
+
 
         print(f'Adding and training first layer for {pretrain_epochs} epochs')
 
@@ -164,6 +171,9 @@ class DEC_greedy_autoencoder(Autoencoder):
         self.encoder = full_encoder
 
         return history
+
+    def train(self):
+        self.greedy_pretraining()
 
     def add_and_fit_layers(self, loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list, dropout_rate, current_encoder_stack, input, verbose):
 

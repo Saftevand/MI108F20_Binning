@@ -97,3 +97,4 @@ class clustering_k_means(clustering_method):
             clusters.append(current_cluster)
 
         self.clustered_data = pd.DataFrame(clusters)
+        return self.clustered_data

@@ -42,9 +42,7 @@ class Data_processor():
 
         return feature_matrix
 
-
     def get_train_and_validation_data(self, feature_matrix, split_value=0.8):
-
         split_length = math.floor(len(feature_matrix) * split_value)
         train = feature_matrix[:split_length, :]
         validate = feature_matrix[split_length + 1:, :]

@@ -17,6 +17,7 @@ class Binner:
 
         self.autoencoder.x_train = train
         self.autoencoder.x_valid = validation
+        self.autoencoder.train()
         self.extracted_features = self.autoencoder.extract_features(self.feature_matrix)
 
     def do_clustering(self):
