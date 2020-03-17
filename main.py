@@ -12,14 +12,27 @@ from sklearn.preprocessing import normalize
 from sklearn.manifold import TSNE
 import seaborn as sns
 
+def visualize(data, colors=None):
+    if colors is None:
+        colors = ['bo', 'ro', 'go', 'mo', 'ko', 'co', 'mo', 'yo', 'bx', 'rx', 'gx', 'mx', 'kx', 'cx', 'mx', 'yx',
+                  'bv', 'rv', 'gv', 'mv', 'kv', 'cv', 'mv', 'yv', 'bs', 'rs', 'gs', 'ms', 'ks', 'cs', 'ms', 'ys',
+                  'bp', 'rp', 'gp', 'mp', 'kp', 'cp', 'mp', 'yp', 'b+', 'r+', 'g+', 'm+', 'k+', 'c+', 'm+', 'y+']
+    for i in range(0, data.axes[0].stop):
+        for j in range(0, data.axes[1].stop):
+            if (data[j][i] is not None):
+                plt.plot(data[j][i][0], data[j][i][1], colors[i])
+            # print(data[j][i])
+    plt.show()
+
+
 if __name__ == '__main__':
-    _multiprocessing.freeze_support() # Skal være her så længe at vi bruger vambs metode til at finde depth
+    _multiprocessing.freeze_support()  # Skal være her så længe at vi bruger vambs metode til at finde depth
 
     use_depth = False
     load_data = True
 
-    if(use_depth):
-        if(load_data):
+    if (use_depth):
+        if (load_data):
             tnfs = np.load('vamb_tnfs.npy')
             depth = np.load('vamb_depths.npy')
         else:
@@ -40,22 +53,16 @@ if __name__ == '__main__':
         val = tnfs[split_length + 1:, :]
 
     AE = autoencoder_simple.stacked_autoencoder(train=train, valid=val, input_layer_size=len(train[0]))
-    history, model = AE.train(number_of_epoch=1)
+    history, model = AE.train(number_of_epoch=5)
 
-    test = AE.encoder.predict(tnfs)
+    test = AE.encoder.predict(train)
     k_means = clustering_k_means.clustering_k_means(k_clusters=5)
 
     k_means.do_clustering(dataset=test, max_iterations=5)
 
-    #tsned = TSNE(n_components=2).fit_transform(k_means.clustered_data)
-    #plt.figure(figsize=(16,10))
-    #sns.scatterplot(hue='y',
-    #                palette=sns.color_palette("hls", 10),
-    #                data=k_means.clustered_data,
-    #                legend="full",
-    #                alpha=0.3)
+    data = k_means.clustered_data
 
-
+    visualize(data)
 
     # Plot training & validation accuracy values
     plt.plot(history.history['accuracy'])
