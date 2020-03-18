@@ -17,6 +17,22 @@ class clustering_element():
         self.element = element
 
 
+class random_cluster(clustering_method):
+    def __init__(self, k_clusters=10):
+        self.k = k_clusters
+        self.clustered_data = None
+
+    def do_clustering(self, dataset):
+        clusters = [[] for i in range(self.k)]
+        for contig in dataset:
+            assignment = randint(0, self.k-1)
+            list = clusters[assignment]
+            list.append(contig)
+
+        self.clustered_data = pd.DataFrame(clusters)
+        return self.clustered_data
+
+
 class clustering_k_means(clustering_method):
     def __init__(self, k_clusters=10):
         self.k = k_clusters

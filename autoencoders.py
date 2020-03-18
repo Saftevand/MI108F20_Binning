@@ -120,7 +120,7 @@ class DEC_greedy_autoencoder(Autoencoder):
     def predict(self, data):
         return self.model.predict(data)
 
-    def greedy_pretraining(self, loss_function=keras.losses.binary_crossentropy, lr=0.01, finetune_epochs=5000, pretrain_epochs=2000, neuron_list=[500,500,2000,10], input_shape=None,  dropout_rate=0.2, verbose=0):
+    def greedy_pretraining(self, loss_function=keras.losses.binary_crossentropy, lr=0.01, finetune_epochs=1, pretrain_epochs=1, neuron_list=[500,10], input_shape=None,  dropout_rate=0.2, verbose=1):
         if input_shape is None:
             input_shape = len(self.x_train[0])
 

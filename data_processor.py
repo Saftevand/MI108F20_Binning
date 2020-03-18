@@ -48,3 +48,23 @@ class Data_processor():
         validate = feature_matrix[split_length + 1:, :]
 
         return train, validate
+
+    def write_bins_to_file(self, sequences, bins):
+
+
+        contig_names = one
+        bin_ids = two
+        length = three
+
+        bin_string = "@@SEQUENCEID\tBINID\tLENGTH\n"
+
+        for i in range(0, len(contig_names)):
+            bin_string += f'{contig_names[i]}\t{bin_ids[i]}\t{length[i]}\n'
+
+        with open('binzz.tsv', 'w') as output:
+            output.write(bin_string)
+
+
+
+
+

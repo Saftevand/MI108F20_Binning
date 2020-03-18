@@ -10,9 +10,9 @@ import binner
 
 
 if __name__ == '__main__':
-    _multiprocessing.freeze_support()  # Skal være her så længe at vi bruger vambs metode til at finde depth
+    #_multiprocessing.freeze_support()  # Skal være her så længe at vi bruger vambs metode til at finde depth
 
-    #dp = data_processor.Data_processor()
+    dp = data_processor.Data_processor()
 
     #train, val = dp.get_train_and_validation_data()
 
@@ -23,10 +23,12 @@ if __name__ == '__main__':
     #k_means = clustering_methods.clustering_k_means(k_clusters=5)
 
 
-    binner_ = binner.Binner(autoencoder=autoencoders.DEC_greedy_autoencoder(train=None, valid=None), clustering_method= clustering_methods.clustering_k_means())
+    #binner_ = binner.Binner(autoencoder=autoencoders.DEC_greedy_autoencoder(train=None, valid=None), clustering_method= clustering_methods.random_cluster())
 
-    binner_.extract_features()
-    binner_.do_clustering()
+    #binner_.extract_features()
+    #binner_.do_clustering()
+
+    dp.write_bins_to_file(['seq1', 'seq2'], ['bin1', 'bin2'], ['len1', 'len2'])
 
     print("breakpoint")
 
