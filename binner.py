@@ -13,4 +13,5 @@ class Binner:
 
     def do_binning(self):
         self.extracted_features = self.autoencoder.extract_features(self.feature_matrix)
-        self.bins = self.clustering_method.do_clustering(self.extracted_features)
+
+        self.bins = self.clustering_method.do_clustering(self.extracted_features, self.feature_matrix.axes[0].array)

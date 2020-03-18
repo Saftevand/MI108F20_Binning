@@ -2,14 +2,22 @@ import vamb_tools
 import numpy as np
 from sklearn.preprocessing import normalize
 import math
+import pandas as pd
 
 
 def get_tnfs(path=None):
     if path is None:
         path = 'test/bigfasta.fna.gz'
     with vamb_tools.Reader(path, 'rb') as filehandle:
-        tnfs = vamb_tools.read_contigs(filehandle, minlength=4)
-    return tnfs
+        tnfs, contig_names = vamb_tools.read_contigs(filehandle, minlength=4)
+
+    dict= {}
+
+    for i in range(0, len(tnfs)):
+        dict[contig_names[i]] = tnfs[i]
+    df = pd.DataFrame(data=dict).T
+
+    return df
 
 
 def get_depth(paths=None):
@@ -19,7 +27,7 @@ def get_depth(paths=None):
     return vamb_tools.read_bamfiles(paths)
 
 
-def get_featurematrix(use_depth=False, load_data=True):
+def get_featurematrix(use_depth=False, load_data=False):
     use_depth = use_depth
     load_data = load_data
     feature_matrix = None
@@ -44,7 +52,13 @@ def get_featurematrix(use_depth=False, load_data=True):
 
 def get_train_and_validation_data(feature_matrix, split_value=0.8):
     split_length = math.floor(len(feature_matrix) * split_value)
+    train = feature_matrix[:split_length]
+    validate = feature_matrix[split_length + 1:]
+
+    '''
+    split_length = math.floor(len(feature_matrix) * split_value)
     train = feature_matrix[:split_length, :]
     validate = feature_matrix[split_length + 1:, :]
+    '''
 
     return train, validate
