@@ -5,16 +5,20 @@ import pandas as pd
 import abc
 
 
-class clustering_method():
+class clustering_method:
+    def __init__(self):
+        pass
+
     @abc.abstractmethod
-    def do_clustering(self, dataset, max_iterations=5):
+    def do_clustering(self, dataset, contig_names, max_iterations=5):
         pass
 
 
 class clustering_element():
-    def __init__(self, cluster, element):
+    def __init__(self, cluster, element, name):
         self.cluster = cluster
         self.element = element
+        self.name = name
 
 
 class random_cluster(clustering_method):
@@ -38,7 +42,6 @@ class clustering_k_means(clustering_method):
         self.k = k_clusters
         self.centroids = []
         self.clustered_data = None
-
 
     def forgy_init(self, dataset):
         length = len(dataset)
@@ -88,14 +91,14 @@ class clustering_k_means(clustering_method):
 
             self.centroids[i] = new_centroid
 
-    def prep_data(self, dataset):
+    def prep_data(self, dataset, contig_names):
         result = []
         for i in range(0, len(dataset)):
-            result.append(clustering_element(element=dataset[i], cluster=-1))
+            result.append(clustering_element(element=dataset[i], cluster=-1, name=contig_names[i]))
         return result
 
-    def do_clustering(self, dataset, max_iterations=10):
-        prep_dataset = self.prep_data(dataset)
+    def do_clustering(self, dataset, contig_names, max_iterations=10):
+        prep_dataset = self.prep_data(dataset, contig_names)
         self.forgy_init(dataset=dataset)
         self.assignment_step(dataset=prep_dataset)
 
@@ -106,11 +109,23 @@ class clustering_k_means(clustering_method):
         clusters = []
 
         for i in range(0, self.k):
-            current_cluster = []
+            current_cluster = {}
             points_in_cluster = filter(lambda x: x.cluster == i, prep_dataset)
             for j in points_in_cluster:
-                current_cluster.append(j.element)
+                current_cluster[j.name] = j.cluster
+                #current_cluster.append(j.element)
             clusters.append(current_cluster)
 
-        self.clustered_data = pd.DataFrame(clusters)
+        result = pd.DataFrame(clusters)
+        result = result.sum(axis=0, skipna=True)
+
+        self.clustered_data = result
         return self.clustered_data
+
+def get_clustering(cluster):
+
+    return clustering_algorithms_dict[cluster]
+
+clustering_algorithms_dict = {
+    'KMeans': clustering_k_means
+}
