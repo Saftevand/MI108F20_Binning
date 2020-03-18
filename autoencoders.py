@@ -5,9 +5,9 @@ import abc
 
 
 class Autoencoder:
-    def __init__(self, train, valid):
-        self.x_train = train
-        self.x_valid = valid
+    def __init__(self):
+        self.x_train = None
+        self.x_valid = None
 
     @abc.abstractmethod
     def extract_features(self, feature_matrix):
@@ -20,17 +20,18 @@ class Autoencoder:
 
 class Stacked_autoencoder(Autoencoder):
 
-    def __init__(self, train, valid, input_layer_size):
-        super().__init__(train, valid)
-        self.x_train = train
-        self.x_valid = valid
-        self._input_layer_size = input_layer_size
+    def __init__(self):
+        super().__init__()
+        self.x_train = None
+        self.x_valid = None
+        self._input_layer_size = None
         self.encoder = None
         self.decoder = None
 
     def _encoder(self):
         if (self.encoder is not None):
             return self.encoder
+        self._input_layer_size = len(self.x_train[0])
 
         stacked_encoder = keras.models.Sequential([
             keras.layers.Dense(1000, activation="selu", input_shape=[self._input_layer_size,], kernel_initializer=keras.initializers.lecun_normal()),
@@ -63,15 +64,15 @@ class Stacked_autoencoder(Autoencoder):
         return history, stacked_ae
 
     def extract_features(self, feature_matrix):
-        return self.encoder.predict()
+        return self.encoder.predict(feature_matrix)
 
 
 class DEC_autoencoder(Autoencoder):
 
-    def __init__(self, train, valid):
-        super().__init__(train, valid)
-        self.x_train = train
-        self.x_valid = valid
+    def __init__(self):
+        super().__init__()
+        self.x_train = None
+        self.x_valid = None
 
     def _encoder(self):
         stacked_encoder = keras.models.Sequential([
@@ -103,8 +104,8 @@ class DEC_autoencoder(Autoencoder):
 
 class DEC_greedy_autoencoder(Autoencoder):
 
-    def __init__(self, train, valid):
-        super().__init__(train, valid)
+    def __init__(self):
+        super().__init__()
         self.x_train = train
         self.x_valid = valid
         self.autoencoder = None
@@ -293,3 +294,11 @@ class DEC_greedy_autoencoder(Autoencoder):
         print("Sæt breakpoint på mig")
 
 
+def get_feature_extractor(fe):
+    return feature_extractor_dict[fe]
+
+feature_extractor_dict = {
+    'DEC': DEC_autoencoder,
+    'DECG': DEC_greedy_autoencoder,
+    'SAE': Stacked_autoencoder
+}

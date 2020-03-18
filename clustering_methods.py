@@ -98,3 +98,11 @@ class clustering_k_means(clustering_method):
 
         self.clustered_data = pd.DataFrame(clusters)
         return self.clustered_data
+
+def get_clustering(cluster):
+
+    return clustering_algorithms_dict[cluster]
+
+clustering_algorithms_dict = {
+    'KMeans': clustering_k_means
+}
