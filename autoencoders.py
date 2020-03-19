@@ -4,7 +4,7 @@ import numpy as np
 import abc
 
 
-class Autoencoder:
+class Autoencoder(abc.ABC):
     def __init__(self):
         self.x_train = None
         self.x_valid = None

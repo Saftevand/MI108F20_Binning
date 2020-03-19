@@ -24,7 +24,7 @@ def main():
     _binner.autoencoder.train()
     _binner.do_binning()
 
-    wait = input('Binning complete! Press any key to exit.')
+
 
 
 def handle_input_arguments():
