@@ -44,8 +44,6 @@ def main():
     _binner.do_binning()
     data_processor.write_bins_to_file(_binner.bins)
 
-    wait = input('Binning complete! Press any key to exit.')
-
 
 def handle_input_arguments():
     parser = argparse.ArgumentParser()
