@@ -26,7 +26,7 @@ class random_cluster(clustering_method):
         self.k = k_clusters
         self.clustered_data = None
 
-    def do_clustering(self, dataset):
+    def do_clustering(self, dataset, contignames):
         clusters = [[] for i in range(self.k)]
         for contig in dataset:
             assignment = randint(0, self.k-1)
@@ -127,5 +127,6 @@ def get_clustering(cluster):
     return clustering_algorithms_dict[cluster]
 
 clustering_algorithms_dict = {
-    'KMeans': clustering_k_means
+    'KMeans': clustering_k_means,
+    'Random': random_cluster
 }

@@ -54,21 +54,25 @@ def get_train_and_validation_data(feature_matrix, split_value=0.8):
     split_length = math.floor(len(feature_matrix) * split_value)
     train = feature_matrix[:split_length]
     validate = feature_matrix[split_length + 1:]
+    return train, validate
 
-    def write_bins_to_file(self, sequences, bins):
 
+def write_bins_to_file(bins):
 
-        contig_names = one
-        bin_ids = two
-        length = three
+    bin_string = "@@SEQUENCEID\tBINID\tLENGTH\n"
 
-        bin_string = "@@SEQUENCEID\tBINID\tLENGTH\n"
+    data_head = bins.head()
 
-        for i in range(0, len(contig_names)):
-            bin_string += f'{contig_names[i]}\t{bin_ids[i]}\t{length[i]}\n'
+    #for contig_name, bin_id in bins.iterrows():
+    #    bin_string += f'{contig_name}\t{bin_id}\n'
 
-        with open('binzz.tsv', 'w') as output:
-            output.write(bin_string)
+    for index in data_head.index:
+        bin_string += f'{index}\t{bins.loc[index]}\n'
+
+    with open('binzz.tsv', 'w') as output:
+        output.write(bin_string)
+
+    print(bin_string)
 
 
 

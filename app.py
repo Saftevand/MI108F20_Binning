@@ -23,6 +23,7 @@ def main():
 
     _binner.autoencoder.train()
     _binner.do_binning()
+    data_processor.write_bins_to_file(_binner.bins)
 
     wait = input('Binning complete! Press any key to exit.')
 
@@ -34,7 +35,7 @@ def handle_input_arguments():
     parser.add_argument("-r", "--read", help="Path to read")
     parser.add_argument("-b", "--bam", help="Path to BAM files")
     parser.add_argument("-c", "--cluster",nargs='?', default="KMeans", const="KMeans", help="Clustering algorithm to be used")
-    parser.add_argument("-fe", "--featureextractor", nargs='?', default="DEC", const="DEC", help="Feature extractor to be used")
+    parser.add_argument("-fe", "--featureextractor", nargs='?', default="SAE", const="SAE", help="Feature extractor to be used")
     return parser.parse_args()
 
 
