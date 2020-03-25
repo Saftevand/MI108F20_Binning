@@ -1,4 +1,3 @@
-import tensorflow as tf
 from tensorflow import keras
 import numpy as np
 import abc
@@ -34,9 +33,10 @@ class Stacked_autoencoder(Autoencoder):
         self._input_layer_size = self.x_train.sample(1).size
 
         stacked_encoder = keras.models.Sequential([
-            keras.layers.Dense(1000, activation="selu", input_shape=[self._input_layer_size,], kernel_initializer=keras.initializers.lecun_normal()),
-            keras.layers.Dense(100, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
-            keras.layers.Dense(2, activation="selu", kernel_initializer=keras.initializers.lecun_normal()), ])
+            keras.layers.Dense(500, activation="selu", input_shape=[self._input_layer_size,], kernel_initializer=keras.initializers. lecun_normal()),
+            keras.layers.Dense(500, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
+            keras.layers.Dense(2000, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
+            keras.layers.Dense(10, kernel_initializer=keras.initializers.lecun_normal()), ])
         self.encoder = stacked_encoder
         return stacked_encoder
 
@@ -45,13 +45,14 @@ class Stacked_autoencoder(Autoencoder):
             return self.decoder
 
         stacked_decoder = keras.models.Sequential([
-            keras.layers.Dense(100, activation="selu", input_shape=[2], kernel_initializer=keras.initializers.lecun_normal()),
-            keras.layers.Dense(1000, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
-            keras.layers.Dense(self._input_layer_size, activation="sigmoid", kernel_initializer=keras.initializers.RandomNormal), ])
+            keras.layers.Dense(2000, activation="selu", input_shape=[10], kernel_initializer=keras.initializers.lecun_normal()),
+            keras.layers.Dense(500, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
+            keras.layers.Dense(500, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
+            keras.layers.Dense(self._input_layer_size, kernel_initializer=keras.initializers.lecun_normal()), ])
         self.decoder = stacked_decoder
         return stacked_decoder
 
-    def train(self, loss_funciton=keras.losses.binary_crossentropy, optimizer_=keras.optimizers.SGD(lr=0.75), number_of_epoch=10):
+    def train(self, loss_funciton=keras.losses.mse, optimizer_=keras.optimizers.Adam(lr=0.03), number_of_epoch=50000):
         stacked_ae = keras.models.Sequential([self._encoder(), self._decoder()])
         stacked_ae.compile(loss=loss_funciton,
                            optimizer=optimizer_,

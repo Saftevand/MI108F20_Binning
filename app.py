@@ -19,13 +19,15 @@ set_session(sess)  # set this TensorFlow session as the default session for Kera
 '''
 
 def main():
+
+    '''     Simon GPU fix
     physical_devices = tf.config.list_physical_devices('GPU')
     try:
         tf.config.experimental.set_memory_growth(physical_devices[0], True)
     except:
         # Invalid device or cannot modify virtual devices once initialized.
         pass
-
+    '''
 
     args = handle_input_arguments()
     print(args)
@@ -35,7 +37,7 @@ def main():
 
     _binner = binner.Binner(autoencoder=fe,
                             clustering_method=clustering_algorithm,
-                            feature_matrix=data_processor.get_featurematrix())
+                            feature_matrix=data_processor.get_featurematrix(args.read, args.bam))
 
     _binner.autoencoder.x_train, _binner.autoencoder.x_valid = \
         data_processor.get_train_and_validation_data(feature_matrix=_binner.feature_matrix, split_value=0.8)
@@ -50,7 +52,7 @@ def handle_input_arguments():
 
     #parser.add_argument("-r", "--read", help="Path to read", required=True)
     parser.add_argument("-r", "--read", help="Path to read")
-    parser.add_argument("-b", "--bam", help="Path to BAM files")
+    parser.add_argument("-b", "--bam", help="Bam files", nargs='+')
     parser.add_argument("-c", "--cluster",nargs='?', default="KMeans", const="KMeans", help="Clustering algorithm to be used")
     parser.add_argument("-fe", "--featureextractor", nargs='?', default="SAE", const="SAE", help="Feature extractor to be used")
     return parser.parse_args()

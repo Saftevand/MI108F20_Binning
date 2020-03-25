@@ -27,18 +27,17 @@ def get_depth(paths=None):
     return vamb_tools.read_bamfiles(paths)
 
 
-def get_featurematrix(use_depth=False, load_data=False):
-    use_depth = use_depth
-    load_data = load_data
+def get_featurematrix(read_path, bam_path):
+    load_data = False
     feature_matrix = None
 
-    if (use_depth):
+    if (bam_path):
         if (load_data):
             tnfs = np.load('vamb_tnfs.npy')
             depth = np.load('vamb_depths.npy')
         else:
-            tnfs = get_tnfs()
-            depth = get_depth()
+            tnfs = get_tnfs(read_path)
+            depth = get_depth(bam_path)
         norm_depth = normalize(depth, axis=1, norm='l1')
         feature_matrix = np.hstack([tnfs, norm_depth])
     else:
