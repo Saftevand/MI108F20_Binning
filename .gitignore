@@ -132,6 +132,14 @@ dmypy.json
 
 venv2/
 
+tnfs.npy
+
+vamb_depths.npy
+
+vamb_tnfs.npy
+
+binzz.tsv
+
 results/
 
 vamb_depths.npy
