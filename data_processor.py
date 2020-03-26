@@ -62,7 +62,7 @@ def write_bins_to_file(bins):
     for index in bins.index:
         bins_string += f'{index}\t{bins.loc[index]}\n'
 
-    with open('binzz.tsv', 'w') as output:
+    with open('binning_results.tsv', 'w') as output:
         output.write(bins_string)
 
 

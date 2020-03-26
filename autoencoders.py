@@ -1,7 +1,35 @@
 from tensorflow import keras
 import numpy as np
 import abc
+from clustering_layer_xifeng import ClusteringLayer
+from sklearn.cluster import KMeans
+from time import time
 
+
+from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
+
+nmi = normalized_mutual_info_score
+ari = adjusted_rand_score
+
+
+def acc(y_true, y_pred):
+    """
+    Calculate clustering accuracy. Require scikit-learn installed
+    # Arguments
+        y: true labels, numpy.array with shape `(n_samples,)`
+        y_pred: predicted labels, numpy.array with shape `(n_samples,)`
+    # Return
+        accuracy, in [0,1]
+    """
+    y_true = y_true.astype(np.int64)
+    assert y_pred.size == y_true.size
+    D = max(y_pred.max(), y_true.max()) + 1
+    w = np.zeros((D, D), dtype=np.int64)
+    for i in range(y_pred.size):
+        w[y_pred[i], y_true[i]] += 1
+    from sklearn.utils.linear_assignment_ import linear_assignment
+    ind = linear_assignment(w.max() - w)
+    return sum([w[i, j] for i, j in ind]) * 1.0 / y_pred.size
 
 class Autoencoder(abc.ABC):
     def __init__(self):
@@ -16,9 +44,217 @@ class Autoencoder(abc.ABC):
     def train(self):
         pass
 
+class DEC_xifeng_guo(Autoencoder):
+    def __init__(self):
+        super().__init__()
+        self.x_train = None
+        self.x_valid = None
+        self._input_layer_size = None
+
+        self.encoder = None
+        self.autoencoder = None
+        self.model = None
+
+        self.results = None
+        self.n_clusters = None
+
+
+    def extract_features(self, feature_matrix):
+        print("This method 'extract_features()' is not used currently")
+
+    def train(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
+              pretrain_epochs=200, batch_size=128, save_dir='results', tolerance_threshold=1e-3,
+              max_iterations=100):
+
+        self.n_clusters = n_clusters
+        input_shape = self.x_train.shape[-1]
+        self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 500, 500, 2000, 10], act='relu', init=init)
+
+        clustering_layer = ClusteringLayer(self.n_clusters, name='clustering')(self.encoder.output)
+        self.model = keras.models.Model(inputs=self.encoder.input, outputs=clustering_layer)
+
+
+        # y er labels... det har vi ikke
+        y = None
+
+        self.pretrain(x=self.x_train, y=y, optimizer=pretrain_optimizer,
+                         epochs=pretrain_epochs, batch_size=batch_size,
+                         save_dir=save_dir)
+
+
+        self.model.summary()
+        t0 = time()
+        self.compile(optimizer=keras.optimizers.SGD(0.01, 0.9), loss='kld')
+        y_pred = self.fit(self.x_train, y=y, tolerance_threshold=tolerance_threshold, maxiter=max_iterations, batch_size=batch_size,
+                         update_interval=update_interval, save_dir=save_dir)
+        # print('acc:', metrics.acc(y, y_pred))
+        print('clustering time: ', (time() - t0))
+        self.results = y_pred
+
+    def pretrain(self, x, y=None, optimizer='adam', epochs=200, batch_size=256, save_dir='results/temp'):
+        print('...Pretraining...')
+        self.autoencoder.compile(optimizer=optimizer, loss='mse')
+
+        csv_logger = keras.callbacks.CSVLogger(save_dir + '/pretrain_log.csv')
+        cb = [csv_logger]
+        if y is not None:
+            class PrintACC(keras.callbacks.Callback):
+                def __init__(self, x, y):
+                    self.x = x
+                    self.y = y
+                    super(PrintACC, self).__init__()
+
+                def on_epoch_end(self, epoch, logs=None):
+                    if int(epochs/10) != 0 and epoch % int(epochs/10) != 0:
+                        return
+                    feature_model = keras.models.Model(self.model.input,
+                                          self.model.get_layer(
+                                              'encoder_%d' % (int(len(self.model.layers) / 2) - 1)).output)
+                    features = feature_model.predict(self.x)
+                    km = KMeans(n_clusters=len(np.unique(self.y)), n_init=20, n_jobs=4)
+                    y_pred = km.fit_predict(features)
+                    # print()
+                    print(' '*8 + '|==>  acc: %.4f,  nmi: %.4f  <==|'
+                          % (acc(self.y, y_pred), nmi(self.y, y_pred)))
+
+            cb.append(PrintACC(x, y))
+
+        # begin pretraining
+        t0 = time()
+        self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs, callbacks=cb)
+        print('Pretraining time: %ds' % round(time() - t0))
+        self.autoencoder.save_weights(save_dir + '/ae_weights.h5')
+        print('Pretrained weights are saved to %s/ae_weights.h5' % save_dir)
+        self.pretrained = True
+
+    def extract_features(self, x):
+        return self.encoder.predict(x)
+
+    def predict(self, x):  # predict cluster labels using the output of clustering layer
+        q = self.model.predict(x, verbose=0)
+        return q.argmax(1)
+
+    @staticmethod
+    def target_distribution(q):
+        weight = q ** 2 / q.sum(0)
+        return (weight.T / weight.sum(1)).T
+
+    def compile(self, optimizer='sgd', loss='kld'):
+        self.model.compile(optimizer=optimizer, loss=loss)
+
+    def define_model(self, dims, act='relu', init='glorot_uniform'):
+        """
+            Fully connected auto-encoder model, symmetric.
+            Arguments:
+                dims: list of number of units in each layer of encoder. dims[0] is input dim, dims[-1] is units in hidden layer.
+                    The decoder is symmetric with encoder. So number of layers of the auto-encoder is 2*len(dims)-1
+                act: activation, not applied to Input, Hidden and Output layers
+            return:
+                (ae_model, encoder_model), Model of autoencoder and model of encoder
+            """
+
+        n_stacks = len(dims) - 1
+        # input
+        x = keras.layers.Input(shape=(dims[0],), name='input')
+        h = x
+
+        # internal layers in encoder
+        for i in range(n_stacks - 1):
+            h = keras.layers.Dense(dims[i + 1], activation=act, kernel_initializer=init, name='encoder_%d' % i)(h)
+
+        # hidden layer
+        h = keras.layers.Dense(dims[-1], kernel_initializer=init, name='encoder_%d' % (n_stacks - 1))(
+            h)  # hidden layer, features are extracted from here
+
+        y = h
+        # internal layers in decoder
+        for i in range(n_stacks - 1, 0, -1):
+            y = keras.layers.Dense(dims[i], activation=act, kernel_initializer=init, name='decoder_%d' % i)(y)
+
+        # output
+        y = keras.layers.Dense(dims[0], kernel_initializer=init, name='decoder_0')(y)
+
+        return keras.models.Model(inputs=x, outputs=y, name='AE'), keras.models.Model(inputs=x, outputs=h,
+                                                                                      name='encoder')
+
+    def fit(self, x, y=None, maxiter=2e4, batch_size=258, tolerance_threshold=1e-3,
+            update_interval=150, save_dir='./results/temp'):
+
+        # tolerance threshold ~~ stopping criterion
+
+        print('Update interval', update_interval)
+
+        save_interval = int(x.shape[0] / batch_size) * 5  # 5 epochs
+        print('Save interval', save_interval)
+
+        # Step 1: initialize cluster centers using k-means
+        t1 = time()
+        print('Initializing cluster centers with k-means.')
+        kmeans = KMeans(n_clusters=self.n_clusters, n_init=20)
+        y_pred = kmeans.fit_predict(self.encoder.predict(x))
+        y_pred_last = np.copy(y_pred)
+        self.model.get_layer(name='clustering').set_weights([kmeans.cluster_centers_])
+
+        # Step 2: deep clustering
+        # logging file
+        import csv
+        logfile = open(save_dir + '/dec_log.csv', 'w')
+        logwriter = csv.DictWriter(logfile, fieldnames=['iter', 'acc', 'nmi', 'ari', 'loss'])
+        logwriter.writeheader()
+
+        loss = 0
+        index = 0
+        index_array = np.arange(x.shape[0])
+        for ite in range(int(maxiter)):
+            if ite % update_interval == 0:
+                q = self.model.predict(x, verbose=0)
+                p = self.target_distribution(q)  # update the auxiliary target distribution p
+
+                # evaluate the clustering performance
+                y_pred = q.argmax(1)
+                if y is not None:
+                    acc = np.round(acc(y, y_pred), 5)
+                    nmi = np.round(nmi(y, y_pred), 5)
+                    ari = np.round(ari(y, y_pred), 5)
+                    loss = np.round(loss, 5)
+                    logdict = dict(iter=ite, acc=acc, nmi=nmi, ari=ari, loss=loss)
+                    logwriter.writerow(logdict)
+                    print('Iter %d: acc = %.5f, nmi = %.5f, ari = %.5f' % (ite, acc, nmi, ari), ' ; loss=', loss)
+
+                # check stop criterion
+                delta_label = np.sum(y_pred != y_pred_last).astype(np.float32) / y_pred.shape[0]
+                y_pred_last = np.copy(y_pred)
+                if ite > 0 and delta_label < tolerance_threshold:
+                    print('delta_label ', delta_label, '< tol ', tolerance_threshold)
+                    print('Reached tolerance threshold. Stopping training.')
+                    logfile.close()
+                    break
+
+            # train on batch
+            # if index == 0:
+            #     np.random.shuffle(index_array)
+            idx = index_array[index * batch_size: min((index+1) * batch_size, x.shape[0])]
+            xidx = x[idx]
+            pidx = p[idx]
+            loss = self.model.train_on_batch(x=xidx, y=pidx)
+            index = index + 1 if (index + 1) * batch_size <= x.shape[0] else 0
+
+            # save intermediate model
+            if ite % save_interval == 0:
+                print('saving model to:', save_dir + '/DEC_model_' + str(ite) + '.h5')
+                self.model.save_weights(save_dir + '/DEC_model_' + str(ite) + '.h5')
+
+            ite += 1
+
+        # save the trained model
+        logfile.close()
+        print('saving model to:', save_dir + '/DEC_model_final.h5')
+        self.model.save_weights(save_dir + '/DEC_model_final.h5')
+
+        return y_pred
+
 
 class Stacked_autoencoder(Autoencoder):
-
     def __init__(self):
         super().__init__()
         self.x_train = None
@@ -300,7 +536,9 @@ class DEC_greedy_autoencoder(Autoencoder):
 def get_feature_extractor(fe):
     return feature_extractor_dict[fe]
 
+
 feature_extractor_dict = {
     'DEC': DEC_greedy_autoencoder,
-    'SAE': Stacked_autoencoder
+    'SAE': Stacked_autoencoder,
+    'DEC_XIFENG': DEC_xifeng_guo
 }
