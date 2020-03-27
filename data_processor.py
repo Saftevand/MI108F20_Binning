@@ -2,8 +2,6 @@ import vamb_tools
 import numpy as np
 from sklearn.preprocessing import normalize
 import math
-import pandas as pd
-
 
 def get_tnfs(path=None):
     if path is None:
@@ -11,13 +9,7 @@ def get_tnfs(path=None):
     with vamb_tools.Reader(path, 'rb') as filehandle:
         tnfs, contig_names = vamb_tools.read_contigs(filehandle, minlength=4)
 
-    dict= {}
-
-    for i in range(0, len(tnfs)):
-        dict[contig_names[i]] = tnfs[i]
-    df = pd.DataFrame(data=dict).T
-
-    return df
+    return tnfs, contig_names
 
 
 def get_depth(paths=None):
@@ -36,7 +28,7 @@ def get_featurematrix(read_path, bam_path):
             tnfs = np.load('vamb_tnfs.npy')
             depth = np.load('vamb_depths.npy')
         else:
-            tnfs = get_tnfs(read_path)
+            tnfs, contig_ids = get_tnfs(read_path)
             depth = get_depth(bam_path)
         norm_depth = normalize(depth, axis=1, norm='l1')
         feature_matrix = np.hstack([tnfs, norm_depth])
@@ -44,12 +36,13 @@ def get_featurematrix(read_path, bam_path):
         if (load_data):
             feature_matrix = np.load('vamb_tnfs.npy')
         else:
-            feature_matrix = get_tnfs()
+            feature_matrix, contig_ids = get_tnfs()
 
-    return feature_matrix
+    return feature_matrix, contig_ids
 
 
 def get_train_and_validation_data(feature_matrix, split_value=0.8):
+    # TODO måske skal ham her være lidt bedre. Det er farligt at tage de første x % hver gang
     split_length = math.floor(len(feature_matrix) * split_value)
     train = feature_matrix[:split_length]
     validate = feature_matrix[split_length + 1:]
@@ -59,8 +52,8 @@ def get_train_and_validation_data(feature_matrix, split_value=0.8):
 def write_bins_to_file(bins):
     bins_string = "@@SEQUENCEID\tBINID\tLENGTH\n"
 
-    for index in bins.index:
-        bins_string += f'{index}\t{bins.loc[index]}\n'
+    for i in range(0, len(bins[0])):
+        bins_string += f'{bins[0][i]}\t{bins[1][i]}\n'
 
     with open('binning_results.tsv', 'w') as output:
         output.write(bins_string)

@@ -33,22 +33,16 @@ def main():
     args = handle_input_arguments()
     print(args)
     #   TODO    calc methyl
-    fe = autoencoders.get_feature_extractor(args.featureextractor)()
-    clustering_algorithm = clustering_methods.get_clustering(args.cluster)()
 
-    _binner = binner.Binner(autoencoder=fe,
-                            clustering_method=clustering_algorithm,
-                            feature_matrix=data_processor.get_featurematrix(args.read, args.bam))
+    feature_matrix, contig_ids = data_processor.get_featurematrix(args.read, args.bam)
 
-    _binner.autoencoder.x_train, _binner.autoencoder.x_valid = \
-        data_processor.get_train_and_validation_data(feature_matrix=_binner.feature_matrix, split_value=1)
+    binner_instance = binner.create_binner(split_value=1, clustering_method=args.clustering, binner_type=args.binnertype, feature_matrix=feature_matrix, contig_ids=contig_ids)
 
-    _binner.autoencoder.train()
-    #_binner.do_binning()
-    _binner.bins = _binner.autoencoder.results
-    names = _binner.feature_matrix.axes[0].array
-    conc = clustering_methods.prep_data(_binner.bins, names)
-    data_processor.write_bins_to_file(conc)
+    binner_instance.do_binning()
+
+    results = binner_instance.get_assignments()
+
+    data_processor.write_bins_to_file(results)
 
 
 def handle_input_arguments():
@@ -57,8 +51,8 @@ def handle_input_arguments():
     #parser.add_argument("-r", "--read", help="Path to read", required=True)
     parser.add_argument("-r", "--read", help="Path to read")
     parser.add_argument("-b", "--bam", help="Bam files", nargs='+')
-    parser.add_argument("-c", "--cluster",nargs='?', default="KMeans", const="KMeans", help="Clustering algorithm to be used")
-    parser.add_argument("-fe", "--featureextractor", nargs='?', default="DEC_XIFENG", const="DEC_XIFENG", help="Feature extractor to be used")
+    parser.add_argument("-c", "--clustering",nargs='?', default="KMeans", const="KMeans", help="Clustering algorithm to be used")
+    parser.add_argument("-bt", "--binnertype", nargs='?', default="DEC_XIFENG", const="DEC_XIFENG", help="Binner type to be used")
     return parser.parse_args()
 
 

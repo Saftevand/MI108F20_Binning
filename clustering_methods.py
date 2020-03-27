@@ -5,13 +5,20 @@ import pandas as pd
 import abc
 
 
+
+
 class clustering_method:
     def __init__(self):
         pass
 
     @abc.abstractmethod
-    def do_clustering(self, dataset, contig_names, max_iterations=5):
+    def do_clustering(self, dataset, max_iterations=5):
         pass
+
+    @abc.abstractmethod
+    def get_loss(self):
+        pass
+        # Assignments
 
 
 class clustering_element():
