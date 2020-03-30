@@ -9,11 +9,11 @@ import os as _os
 import multiprocessing as _multiprocessing
 import time as _time
 from hashlib import md5 as _md5
-import bamnostic as _pysam
-#import pysam as _pysam
+#import bamnostic as _pysam
+import pysam as _pysam
 #import vamb.vambtools as _vambtools
 import array
-#from cpython cimport array
+from cpython cimport array
 
 class Reader:
     """Use this instead of `open` to open files which are either plain text,
@@ -219,20 +219,21 @@ def byte_iterfasta(filehandle, comment=b'#'):
 
     yield FastaEntry(header, bytearray().join(buffer))
 
-def c_kmercounts(bytesarray, k: int, counts):
+cdef void c_kmercounts(unsigned char[::1] bytesarray, int k, int[::1] counts):
     """Count tetranucleotides of contig and put them in counts vector.
+
     The bytearray is expected to be np.uint8 of bytevalues of the contig.
     The counts is expected to be an array of 4^k 32-bit integers with value 0.
     """
 
-    kmer = 0
-    character = 0
-    charvalue = 0
-    i = 0
-    countdown = k-1
-    contiglength = len(bytesarray)
-    mask = (1 << (2 * k)) - 1
-    lut = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    cdef unsigned int kmer = 0
+    cdef int character
+    cdef int charvalue
+    cdef int i
+    cdef int countdown = k-1
+    cdef int contiglength = len(bytesarray)
+    cdef int mask = (1 << (2 * k)) - 1
+    cdef unsigned int* lut = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
                               4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
                               4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
                               4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
@@ -263,37 +264,38 @@ def c_kmercounts(bytesarray, k: int, counts):
         else:
             countdown -= 1
 
-def _kmercounts(sequence: bytearray, k: int):
+cpdef _kmercounts(bytearray sequence, int k):
     """Returns a 32-bit integer array containing the count of all kmers
     in the given bytearray.
+
     Only Kmers containing A, C, G, T (bytes 65, 67, 71, 84) are counted"""
 
     if k > 10 or k < 1:
         return ValueError('k must be between 1 and 10, inclusive.')
 
-    counts = _np.zeros(4**k)
+    counts = zeros('i', 4**k)
 
-    sequenceview = sequence
-    countview = counts
+    cdef unsigned char[::1] sequenceview = sequence
+    cdef int[::1] countview = counts
 
     c_kmercounts(sequenceview, k, countview)
 
     return counts
 
-def c_fourmer_freq(counts, result):
+cdef void c_fourmer_freq(int[::1] counts, float[::1] result):
     """Puts kmercounts of k=4 in a nonredundant vector.
 
     The result is expected to be a 136 32-bit float vector
     The counts is expected to be an array of 256 32-bit integers
     """
 
-    countsum = 0
-    i = 0
+    cdef int countsum = 0
+    cdef int i
     # Lookup in this array gives the index of the canonical tetranucleotide.
     # E.g CCTA is the 92nd alphabetic 4mer, whose reverse complement, TAGG, is the 202nd.
     # So the 92th and 202th value in this array is the same.
     # Hence we can map 256 4mers to 136 normal OR reverse-complemented ones
-    complementer_fourmer = [0, 1, 2, 3, 4, 5, 6, 7,
+    cdef unsigned char* complementer_fourmer = [0, 1, 2, 3, 4, 5, 6, 7,
             8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
             18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 11, 31, 32,
             33, 34, 35, 36, 37, 38, 39, 40, 41, 23, 42, 43, 44, 7, 45, 46,
@@ -318,23 +320,23 @@ def c_fourmer_freq(counts, result):
     if countsum == 0:
         return
 
-    floatsum = countsum
+    cdef float floatsum = <float>countsum
 
     for i in range(256):
         result[complementer_fourmer[i]] += counts[i] / floatsum
 
 
-def _fourmerfreq(sequence: bytearray):
+cpdef _fourmerfreq(bytearray sequence):
     """Returns float32 array of 136-length float32 representing the
     tetranucleotide (fourmer) frequencies of the DNA.
     Only fourmers containing A, C, G, T (bytes 65, 67, 71, 84) are counted"""
 
-    counts = _np.zeros(256)
-    frequencies = _np.zeros(136)
+    counts = zeros('i', 256)
+    frequencies = zeros('f', 136)
 
-    sequenceview = sequence
-    fourmercountview = counts
-    frequencyview = frequencies
+    cdef unsigned char[::1] sequenceview = sequence
+    cdef int[::1] fourmercountview = counts
+    cdef float[::1] frequencyview = frequencies
 
     c_kmercounts(sequenceview, 4, fourmercountview)
     c_fourmer_freq(fourmercountview, frequencyview)
