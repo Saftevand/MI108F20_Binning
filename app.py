@@ -1,4 +1,3 @@
-import autoencoders
 import clustering_methods
 import multiprocessing as _multiprocessing
 import binner
@@ -8,19 +7,8 @@ import tensorflow as tf
 from tensorflow import keras
 import clustering_methods
 
-'''
-import tensorflow as tf
-from keras.backend.tensorflow_backend import set_session
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
-config.log_device_placement = True  # to log device placement (on which device the operation ran)
-                                    # (nothing gets printed in Jupyter, only if you run it standalone)
-sess = tf.Session(config=config)
-set_session(sess)  # set this TensorFlow session as the default session for Keras
-'''
 
 def main():
-
     '''     Simon GPU fix
     physical_devices = tf.config.list_physical_devices('GPU')
     try:
@@ -52,7 +40,7 @@ def handle_input_arguments():
     parser.add_argument("-r", "--read", help="Path to read")
     parser.add_argument("-b", "--bam", help="Bam files", nargs='+')
     parser.add_argument("-c", "--clustering",nargs='?', default="KMeans", const="KMeans", help="Clustering algorithm to be used")
-    parser.add_argument("-bt", "--binnertype", nargs='?', default="DEC_XIFENG", const="DEC_XIFENG", help="Binner type to be used")
+    parser.add_argument("-bt", "--binnertype", nargs='?', default="DEC", const="DEC", help="Binner type to be used")
     return parser.parse_args()
 
 
