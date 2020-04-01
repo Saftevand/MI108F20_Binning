@@ -108,3 +108,4 @@ def sort_bins_follow_input(contig_ids: [int], contig_to_bin_id: defaultdict):
     var = []
     for i in contig_ids:
         var.append(contig_to_bin_id[i])
+    return var

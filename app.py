@@ -7,29 +7,34 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 import clustering_methods
+import matplotlib.pyplot as plt
 
 
 def main():
-    '''Simon GPU fix'''
+    '''Simon GPU fix
     physical_devices = tf.config.list_physical_devices('GPU')
     try:
         tf.config.experimental.set_memory_growth(physical_devices[0], True)
     except:
         # Invalid device or cannot modify virtual devices once initialized.
         pass
-
+    '''
 
     args = handle_input_arguments()
     print(args)
     #   TODO    calc methyl
 
-    feature_matrix, contig_ids = data_processor.get_featurematrix(args.read, args.bam)
 
+def simon_main(args):
+    feature_matrix, contig_ids = data_processor.get_featurematrix(args.read, args.bam)
     print("Setup binner")
-    binner_instance = binner.create_binner(split_value=1, clustering_method=args.clustering, binner_type=args.binnertype, feature_matrix=feature_matrix, contig_ids=contig_ids)
+    binner_instance = binner.create_binner(split_value=1, clustering_method=args.clustering,
+                                           binner_type=args.binnertype, feature_matrix=feature_matrix,
+                                           contig_ids=contig_ids)
 
     print("Getting true bins")
-    true_bins, contig_ids_true, contig_to_bin_id = data_processor.get_unique_ids_truth('D:/Downloads/out/gsa_mapping.binning')
+    true_bins, contig_ids_true, contig_to_bin_id = data_processor.get_unique_ids_truth(
+        'D:/Downloads/out/gsa_mapping.binning')
 
     true_bins = data_processor.sort_bins_follow_input(contig_ids, contig_to_bin_id)
 
@@ -37,25 +42,35 @@ def main():
     # Estimate ~ 60 bins in cami low
     # n_clusters er kun en ting for DEC
 
-    # default adam params
-    adam = keras.optimizers.Adam(learning_rate=0.001)
+    # rest are default adam params
+    adam = keras.optimizers.Adam(learning_rate=0.1)
 
+    # glorot uniform is about the same as xavier.... keras stuff
+    # pretrain optimizer is used in both layerwise training and finetuning
     binner_instance.do_binning(init='glorot_uniform',
                                pretrain_optimizer=adam,
+                               neuron_list=[500, 500, 2000, 10],
+                               pretrain_epochs=1,
+                               finetune_epochs=1,
                                n_clusters=60,
                                update_interval=140,
-                               pretrain_epochs=100,
-                               batch_size=128,
-                               save_dir='results',
+                               batch_size=256,
                                tolerance_threshold=1e-3,
                                max_iterations=100,
+                               save_dir='results',
                                true_bins=true_bins)
 
-
+    '''
+    plt.plot(binner_instance.cluster_loss_list, label='MAE (testing data)')
+    plt.title('Clustering loss')
+    plt.ylabel('Loss value')
+    plt.xlabel('No. epoch')
+    plt.legend(loc="upper left")
+    plt.show()
+    '''
     results = binner_instance.get_assignments()
 
     data_processor.write_bins_to_file(results)
-
 
 def handle_input_arguments():
     parser = argparse.ArgumentParser()
