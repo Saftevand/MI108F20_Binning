@@ -141,3 +141,5 @@ vamb_tnfs.npy
 binzz.tsv
 
 results/
+
+binning_results.tsv

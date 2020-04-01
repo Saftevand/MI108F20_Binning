@@ -22,7 +22,7 @@ def main():
     print(args)
     #   TODO    calc methyl
 
-    feature_matrix, contig_ids = data_processor.get_featurematrix(args.read, args.bam)
+    feature_matrix, contig_ids = data_processor.get_featurematrix(args)
 
     binner_instance = binner.create_binner(split_value=1, clustering_method=args.clustering, binner_type=args.binnertype, feature_matrix=feature_matrix, contig_ids=contig_ids)
 
@@ -36,12 +36,38 @@ def main():
 def handle_input_arguments():
     parser = argparse.ArgumentParser()
 
+    group1 = parser.add_mutually_exclusive_group(required=True)
+
+    group2 = parser.add_mutually_exclusive_group(required=True)
+
     #parser.add_argument("-r", "--read", help="Path to read", required=True)
-    parser.add_argument("-r", "--read", help="Path to read")
-    parser.add_argument("-b", "--bam", help="Bam files", nargs='+')
+    group1.add_argument("-r", "--read", help="Path to read")
+    group1.add_argument("-lt", "--loadtnfs", help="Path to tnfs.npy")
+    parser.add_argument("-lc", "--loadcontigids", help="Path to contig_ids.npy")
+
+    group2.add_argument("-b", "--bam", help="Bam files", nargs='+')
+    group2.add_argument("-ld", "--loaddepth", help="Path to depth.npy")
+
+    parser.add_argument("-st", "--savepathtnfs", help="Path to save tnfs")
+    parser.add_argument("-sc", "--savepathcontigids", help="Path to save contigids")
+
     parser.add_argument("-c", "--clustering",nargs='?', default="KMeans", const="KMeans", help="Clustering algorithm to be used")
-    parser.add_argument("-bt", "--binnertype", nargs='?', default="DEC", const="DEC", help="Binner type to be used")
-    return parser.parse_args()
+    parser.add_argument("-bt", "--binnertype",nargs='?', default="DEC", const="DEC", help="Binner type to be used")
+    parser.add_argument("-sd", "--savepathdepth", help="Path to save depths")
+
+    parser.add_argument("-o", "--outdir", required=True,  help="Path to outdir of bins")
+
+    args = parser.parse_args()
+
+    if args.savepathtnfs and not args.read:
+        parser.error("-st requires -r")
+    if args.savepathcontigids and not args.read:
+        parser.error("-sc requires -r")
+    if args.savepathdepth and not args.bam:
+        parser.error("-sd requires -b")
+
+
+    return args
 
 
 if __name__ == '__main__':
