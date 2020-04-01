@@ -141,3 +141,9 @@ vamb_tnfs.npy
 binzz.tsv
 
 results/
+
+cami_low_contig_ids.npy
+
+cami_low_features.npy
+
+cami_low_truths.npy
