@@ -24,6 +24,18 @@ def main():
     print(args)
     #   TODO    calc methyl
 
+    feature_matrix, contig_ids = data_processor.get_featurematrix(args)
+
+    binner_instance = binner.create_binner(split_value=1, clustering_method=args.clustering,
+                                           binner_type=args.binnertype, feature_matrix=feature_matrix,
+                                           contig_ids=contig_ids)
+
+    binner_instance.do_binning()
+
+    results = binner_instance.get_assignments()
+
+    data_processor.write_bins_to_file(results)
+
 
 def simon_main(args):
     feature_matrix, contig_ids = data_processor.get_featurematrix(args.read, args.bam)
