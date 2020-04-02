@@ -9,10 +9,10 @@ from time import time
 
 from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
 
-nmi = normalized_mutual_info_score
-ari = adjusted_rand_score
+measure_nmi = normalized_mutual_info_score
+measure_ari = adjusted_rand_score
 
-def acc(y_true, y_pred):
+def accur(y_true, y_pred):
     """
     TODO maybe not needed when up and running -Simon
     Calculate clustering accuracy. Require scikit-learn installed
@@ -22,6 +22,7 @@ def acc(y_true, y_pred):
     # Return
         accuracy, in [0,1]
     """
+    y_true = np.asarray(y_true)
     y_true = y_true.astype(np.int64)
     assert y_pred.size == y_true.size
     D = max(y_pred.max(), y_true.max()) + 1
@@ -36,7 +37,7 @@ def acc(y_true, y_pred):
 class Binner(abc.ABC):
     def __init__(self, contig_ids, clustering_method, split_value, feature_matrix = None):
         self.feature_matrix = feature_matrix
-        self.bins = None #TODO
+        self.bins = None
         self.contig_ids = contig_ids
         self.clustering_method = clustering_method
         self.x_train, x_valid = data_processor.get_train_and_validation_data(feature_matrix=self.feature_matrix, split_value=split_value)
@@ -109,6 +110,10 @@ class DEC(Binner):
     def do_binning(self) -> [[]]:
         pass
 
+    def predict(self, x):  # predict cluster labels using the output of clustering layer
+        q = self.model.predict(x, verbose=0)
+        return q.argmax(1)
+
     @staticmethod
     def target_distribution(q):
         weight = q ** 2 / q.sum(0)
@@ -116,6 +121,8 @@ class DEC(Binner):
 
     def fit(self, x, y=None, maxiter=2e4, batch_size=258, tolerance_threshold=1e-3,
             update_interval=150, save_dir='./results/temp'):
+
+        loss_list = []
 
         # tolerance threshold ~~ stopping criterion
 
@@ -150,9 +157,9 @@ class DEC(Binner):
                 # evaluate the clustering performance
                 y_pred = q.argmax(1)
                 if y is not None:
-                    acc = np.round(acc(y, y_pred), 5)
-                    nmi = np.round(nmi(y, y_pred), 5)
-                    ari = np.round(ari(y, y_pred), 5)
+                    acc = np.round(accur(y, y_pred), 5)
+                    nmi = np.round(measure_nmi(y, y_pred), 5)
+                    ari = np.round(measure_ari(y, y_pred), 5)
                     loss = np.round(loss, 5)
                     logdict = dict(iter=ite, acc=acc, nmi=nmi, ari=ari, loss=loss)
                     logwriter.writerow(logdict)
@@ -174,6 +181,10 @@ class DEC(Binner):
             xidx = x[idx]
             pidx = p[idx]
             loss = self.model.train_on_batch(x=xidx, y=pidx)
+
+            #saving loss for display later
+            loss_list.append(loss)
+
             index = index + 1 if (index + 1) * batch_size <= x.shape[0] else 0
 
             '''
@@ -189,160 +200,48 @@ class DEC(Binner):
         print('saving model to:', save_dir + '/DEC_model_final.h5')
         self.model.save_weights(save_dir + '/DEC_model_final.h5')
 
-        return y_pred
-
-
-class DEC_Binner_Xifeng(DEC):
-    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix):
-        super().__init__(split_value=split_value, contig_ids=contig_ids, feature_matrix=feature_matrix, clustering_method=clustering_method)
-        self._input_layer_size = None
-
-    def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
-              pretrain_epochs=200, batch_size=128, save_dir='results', tolerance_threshold=1e-3,
-              max_iterations=100):
-
-        self.n_clusters = n_clusters
-        self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 500, 500, 2000, 10],
-                                                           act='relu', init=init)
-
-        clustering_layer = ClusteringLayer(self.n_clusters, name='clustering')(self.encoder.output)
-        self.model = keras.models.Model(inputs=self.encoder.input, outputs=clustering_layer)
-
-        # TODO y er labels... det har vi ikke
-        y = None
-
-        self.pretrain(x=self.x_train, y=y, optimizer=pretrain_optimizer,
-                      epochs=pretrain_epochs, batch_size=batch_size,
-                      save_dir=save_dir)
-
-        self.model.summary()
-        t0 = time()
-        self.compile(optimizer=keras.optimizers.SGD(0.01, 0.9), loss='kld')
-        y_pred = self.fit(self.x_train, y=y, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
-                          batch_size=batch_size,
-                          update_interval=update_interval, save_dir=save_dir)
-        # TODO hvis vi skal udregne acc til ground truth
-        # print('acc:', metrics.acc(y, y_pred))
-        print('clustering time: ', (time() - t0))
-        self.bins = y_pred
-
-    def pretrain(self, x, y=None, optimizer='adam', epochs=200, batch_size=256, save_dir='results/temp'):
-        print('...Pretraining...')
-        self.autoencoder.compile(optimizer=optimizer, loss='mse')
-
-        csv_logger = keras.callbacks.CSVLogger(save_dir + '/pretrain_log.csv')
-        cb = [csv_logger]
-        if y is not None:
-            class PrintACC(keras.callbacks.Callback):
-                def __init__(self, x, y):
-                    self.x = x
-                    self.y = y
-                    super(PrintACC, self).__init__()
-
-                def on_epoch_end(self, epoch, logs=None):
-                    if int(epochs / 10) != 0 and epoch % int(epochs / 10) != 0:
-                        return
-                    feature_model = keras.models.Model(self.model.input,
-                                                       self.model.get_layer(
-                                                           'encoder_%d' % (int(len(self.model.layers) / 2) - 1)).output)
-                    features = feature_model.predict(self.x)
-                    km = KMeans(n_clusters=len(np.unique(self.y)), n_init=20, n_jobs=4)
-                    y_pred = km.fit_predict(features)
-                    # print()
-                    print(' ' * 8 + '|==>  acc: %.4f,  nmi: %.4f  <==|'
-                          % (acc(self.y, y_pred), nmi(self.y, y_pred)))
-
-            cb.append(PrintACC(x, y))
-
-        # begin pretraining
-        t0 = time()
-        self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs, callbacks=cb)
-        print('Pretraining time: %ds' % round(time() - t0))
-        self.autoencoder.save_weights(save_dir + '/ae_weights.h5')
-        print('Pretrained weights are saved to %s/ae_weights.h5' % save_dir)
-        self.pretrained = True
-
-    def extract_features(self, x):
-        return self.encoder.predict(x)
-
-    def predict(self, x):  # predict cluster labels using the output of clustering layer
-        q = self.model.predict(x, verbose=0)
-        return q.argmax(1)
-
-    def compile(self, optimizer='sgd', loss='kld'):
-        self.model.compile(optimizer=optimizer, loss=loss)
-
-    def define_model(self, dims, act='relu', init='glorot_uniform'):
-        """
-            Fully connected auto-encoder model, symmetric.
-            Arguments:
-                dims: list of number of units in each layer of encoder. dims[0] is input dim, dims[-1] is units in hidden layer.
-                    The decoder is symmetric with encoder. So number of layers of the auto-encoder is 2*len(dims)-1
-                act: activation, not applied to Input, Hidden and Output layers
-            return:
-                (ae_model, encoder_model), Model of autoencoder and model of encoder
-            """
-
-        n_stacks = len(dims) - 1
-        # input
-        x = keras.layers.Input(shape=(dims[0],), name='input')
-        h = x
-
-        # internal layers in encoder
-        for i in range(n_stacks - 1):
-            h = keras.layers.Dense(dims[i + 1], activation=act, kernel_initializer=init, name='encoder_%d' % i)(h)
-
-        # hidden layer
-        h = keras.layers.Dense(dims[-1], kernel_initializer=init, name='encoder_%d' % (n_stacks - 1))(
-            h)  # hidden layer, features are extracted from here
-
-        y = h
-        # internal layers in decoder
-        for i in range(n_stacks - 1, 0, -1):
-            y = keras.layers.Dense(dims[i], activation=act, kernel_initializer=init, name='decoder_%d' % i)(y)
-
-        # output
-        y = keras.layers.Dense(dims[0], kernel_initializer=init, name='decoder_0')(y)
-
-        return keras.models.Model(inputs=x, outputs=y, name='AE'), keras.models.Model(inputs=x, outputs=h,
-                                                                                      name='encoder')
+        return y_pred, loss_list
 
 
 class Greedy_pretraining_DEC(DEC):
     def __init__(self, split_value, clustering_method, feature_matrix, contig_ids):
         super().__init__(split_value=split_value, clustering_method=clustering_method, feature_matrix=feature_matrix, contig_ids=contig_ids)
+        self.true_bins = None
+        self.layers_history = []
+        self.finetune_history = None
+        self.cluster_loss_list = None
 
+    def do_binning(self, init='glorot_uniform', pretrain_optimizer=keras.optimizers.Adam(learning_rate=0.001),
+                   n_clusters=10, update_interval=140, pretrain_epochs=10, finetune_epochs=100, batch_size=128,
+                   save_dir='results', tolerance_threshold=1e-3, max_iterations=200, true_bins=None,
+                   neuron_list=[500, 500, 2000, 10]):
 
-    def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
-              pretrain_epochs=200, batch_size=128, save_dir='results', tolerance_threshold=1e-3,
-              max_iterations=100):
-
+        self.true_bins = true_bins
         self.n_clusters = n_clusters
 
-        # TODO we have no labels
-        y = None
-
         # layerwise and finetuned encoder
-        self.greedy_pretraining()
+        self.greedy_pretraining(pretrain_epochs=pretrain_epochs, finetune_epochs=finetune_epochs, pretrain_optimizer=pretrain_optimizer, init=init, neuron_list=neuron_list)
 
         # Insert clustering layer using KLD error
         clustering_layer = ClusteringLayer(self.n_clusters, name='clustering')(self.encoder.output)
         self.model = keras.models.Model(inputs=self.encoder.input, outputs=clustering_layer)
 
-        self.model.compile(optimizer=keras.optimizers.SGD(0.01, 0.9), loss='kld')
+        # Should be SGD according to DEC paper -S
+        self.model.compile(optimizer=keras.optimizers.SGD(lr=0.01), loss='kld')
 
-        y_pred = self.fit(self.x_train, y=y, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
+        # Special fit method defined in DEC class
+        y_pred, self.cluster_loss_list = self.fit(self.x_train, y=self.true_bins, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
                           batch_size=batch_size,
                           update_interval=update_interval, save_dir=save_dir)
         # TODO hvis vi skal udregne acc til ground truth
-        # print('acc:', metrics.acc(y, y_pred))
+        print("Calculating accuracy")
+        print('acc:', accur(self.true_bins, y_pred))
+        print('nmi:', measure_nmi(self.true_bins, y_pred))
+        print('ari:', measure_ari(self.true_bins, y_pred))
         self.bins = y_pred
 
-    def predict(self, data):
-        return self.model.predict(data)
-
-    def greedy_pretraining(self, loss_function=keras.losses.binary_crossentropy, lr=0.01, finetune_epochs=1,
-                           pretrain_epochs=1, neuron_list=[500, 10], input_shape=None, dropout_rate=0.2, verbose=1):
+    def greedy_pretraining(self, pretrain_optimizer, loss_function=keras.losses.binary_crossentropy, lr=0.01, finetune_epochs=10,
+                           pretrain_epochs=10, neuron_list=[500, 500, 2000, 10], input_shape=None, dropout_rate=0.2, verbose=1, activation='relu', init='glorot_uniform'):
         if input_shape is None:
             # feature vector size
             input_shape = self.x_train.shape[1]
@@ -354,20 +253,22 @@ class Greedy_pretraining_DEC(DEC):
         # Create first Encoder decoder pair
         input = keras.layers.Input(shape=(input_shape,))
         dropout_out = keras.layers.Dropout(dropout_rate)(input)
-        enc_layer = keras.layers.Dense(neurons_first_layer, activation='selu', input_shape=[input_shape],
-                                       kernel_initializer=keras.initializers.lecun_normal())
+        enc_layer = keras.layers.Dense(neurons_first_layer, activation=activation, input_shape=[input_shape],
+                                       kernel_initializer=init)
         enc_out = enc_layer(dropout_out)
-        dec_layer = keras.layers.Dense(input_shape, activation='selu', input_shape=[neurons_first_layer],
-                                       kernel_initializer=keras.initializers.lecun_normal())
+        dec_layer = keras.layers.Dense(input_shape, activation=activation, input_shape=[neurons_first_layer],
+                                       kernel_initializer=init)
         dec_out = dec_layer(enc_out)
 
         model = keras.models.Model(inputs=input, outputs=dec_out)
 
-        model.compile(loss=loss_function, optimizer=keras.optimizers.SGD(lr), metrics=['accuracy'])
+        model.compile(loss=loss_function, optimizer=pretrain_optimizer, metrics=['accuracy'])
 
         #model.fit(x=self.x_train, y=self.x_train, epochs=pretrain_epochs, validation_data=[self.x_valid, self.x_valid], verbose=verbose)
 
-        model.fit(x=self.x_train, y=self.x_train, epochs=pretrain_epochs, verbose = verbose)
+        hist = model.fit(x=self.x_train, y=self.x_train, epochs=pretrain_epochs, verbose=verbose)
+
+        self.layers_history.append(hist)
 
         decoder_layer_list = [dec_layer]
 
@@ -376,18 +277,18 @@ class Greedy_pretraining_DEC(DEC):
 
         # add and train more layers
         full_model = self.add_and_fit_layers(loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list,
-                                             dropout_rate, trained_encoder, input, verbose)
+                                             dropout_rate, trained_encoder, input, verbose, pretrain_optimizer, activation, init)
 
         # finetune_model and return history
 
         print(f'Finetuning final model for {finetune_epochs} epochs')
 
-        history = full_model.fit(x=self.x_train, y=self.x_train, epochs=finetune_epochs, batch_size=256, verbose=verbose)
+        self.finetune_history = full_model.fit(x=self.x_train, y=self.x_train, epochs=finetune_epochs, batch_size=256, verbose=verbose)
 
         # Saving full autoencoder because why not?
         self.autoencoder = keras.models.clone_model(full_model)
         self.autoencoder.set_weights(full_model.get_weights())
-        self.autoencoder.compile(loss=loss_function, optimizer=keras.optimizers.SGD(lr), metrics=['accuracy'])
+        self.autoencoder.compile(loss=loss_function, optimizer=pretrain_optimizer, metrics=['accuracy'])
 
         # extract encoder from autoencoder
         out = full_model.layers[1](input)
@@ -396,15 +297,14 @@ class Greedy_pretraining_DEC(DEC):
 
         self.encoder = full_encoder
 
-        return history
 
     def add_and_fit_layers(self, loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list, dropout_rate,
-                           current_encoder_stack, input, verbose):
+                           current_encoder_stack, input, verbose, pretrain_optimizer, activation, init):
 
         which_layer = len(neuron_list)
 
         if which_layer == 0:
-            return self.combine_encoder_decoder(current_encoder_stack, decoder_layer_list, input, loss_function, lr)
+            return self.combine_encoder_decoder(current_encoder_stack, decoder_layer_list, input, loss_function, pretrain_optimizer)
 
         print(f'Adding and training another layer for {pretrain_epochs} epochs')
 
@@ -422,27 +322,29 @@ class Greedy_pretraining_DEC(DEC):
 
         # last encoder layer should not have activation function. allowing full expressiveness
         if which_layer == 1:
-            new_enc_layer = keras.layers.Dense(n_neurons, input_shape=[encoded_data_length],
-                                               kernel_initializer=keras.initializers.lecun_normal())
+            new_enc_layer = keras.layers.Dense(n_neurons, input_shape=[encoded_data_length], kernel_initializer=init)
             new_enc_out = new_enc_layer(dropout_out)
         else:
-            new_enc_layer = keras.layers.Dense(n_neurons, activation='selu', input_shape=[encoded_data_length],
-                                               kernel_initializer=keras.initializers.lecun_normal())
+            new_enc_layer = keras.layers.Dense(n_neurons, activation=activation, input_shape=[encoded_data_length],
+                                               kernel_initializer=init)
             new_enc_out = new_enc_layer(dropout_out)
 
-        # new_enc_layer = keras.layers.Dense(n_neurons, activation='selu', input_shape=[encoded_data_length], kernel_initializer=keras.initializers.lecun_normal())
-        # new_enc_out = new_enc_layer(dropout_out)
+        # Add dropout before decoder layer
+        dropout_decoder_out = keras.layers.Dropout(dropout_rate)(new_enc_out)
 
-        new_dec_layer = keras.layers.Dense(encoded_data_length, activation='selu', input_shape=[n_neurons],
-                                           kernel_initializer=keras.initializers.lecun_normal())
-        new_dec_out = new_dec_layer(new_enc_out)
+        # Add new decoder layer
+        new_dec_layer = keras.layers.Dense(encoded_data_length, activation=activation, input_shape=[n_neurons],
+                                           kernel_initializer=init)
+        new_dec_out = new_dec_layer(dropout_decoder_out)
 
+        # Compile + fit
         model = keras.models.Model(inputs=input_new_layer, outputs=new_dec_out)
+        model.compile(loss=loss_function, optimizer=pretrain_optimizer, metrics=['accuracy'])
+        hist = model.fit(x=encoded_data_train, y=encoded_data_train, epochs=pretrain_epochs, verbose=verbose)
 
-        model.compile(loss=loss_function, optimizer=keras.optimizers.SGD(lr), metrics=['accuracy'])
+        self.layers_history.append(hist)
 
-        model.fit(x=encoded_data_train, y=encoded_data_train, epochs=pretrain_epochs, verbose=verbose)
-
+        # Store decoder layer
         # puts in the opposite end of append()
         decoder_layer_list.insert(0, new_dec_layer)
 
@@ -452,12 +354,12 @@ class Greedy_pretraining_DEC(DEC):
 
         model = keras.models.Model(inputs=input, outputs=out)
         # skal man compile her?
-        model.compile(loss=loss_function, optimizer=keras.optimizers.SGD(lr), metrics=['accuracy'])
+        model.compile(loss=loss_function, optimizer=pretrain_optimizer, metrics=['accuracy'])
 
         return self.add_and_fit_layers(loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list,
-                                       dropout_rate, model, input, verbose)
+                                       dropout_rate, model, input, verbose, pretrain_optimizer, activation, init)
 
-    def combine_encoder_decoder(self, encoder, decoder_layers, input, loss_function, lr):
+    def combine_encoder_decoder(self, encoder, decoder_layers, input, loss_function, optimizer):
 
         out = encoder(input)
         for layer in decoder_layers:
@@ -465,7 +367,7 @@ class Greedy_pretraining_DEC(DEC):
 
         model = keras.models.Model(inputs=input, outputs=out)
         # skal man compile her?
-        model.compile(loss=loss_function, optimizer=keras.optimizers.SGD(lr), metrics=['accuracy'])
+        model.compile(loss=loss_function, optimizer=optimizer, metrics=['accuracy'])
 
         return model
 
@@ -519,6 +421,119 @@ class Greedy_pretraining_DEC(DEC):
             print(np.array_equal(m1[1], m2[1]))
 
         print("Sæt breakpoint på mig")
+
+
+class DEC_Binner_Xifeng(DEC):
+    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix):
+        super().__init__(split_value=split_value, contig_ids=contig_ids, feature_matrix=feature_matrix, clustering_method=clustering_method)
+        self._input_layer_size = None
+
+    def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
+              pretrain_epochs=200, batch_size=128, save_dir='results', tolerance_threshold=1e-3,
+              max_iterations=100):
+
+        self.n_clusters = n_clusters
+        self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 500, 500, 2000, 10],
+                                                           act='relu', init=init)
+
+        clustering_layer = ClusteringLayer(self.n_clusters, name='clustering')(self.encoder.output)
+        self.model = keras.models.Model(inputs=self.encoder.input, outputs=clustering_layer)
+
+        # TODO y er labels... det har vi ikke
+        y = None
+
+        self.pretrain(x=self.x_train, y=y, optimizer=pretrain_optimizer,
+                      epochs=pretrain_epochs, batch_size=batch_size,
+                      save_dir=save_dir)
+
+        self.model.summary()
+        t0 = time()
+        self.compile(optimizer=keras.optimizers.SGD(0.01, 0.9), loss='kld')
+        y_pred = self.fit(self.x_train, y=y, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
+                          batch_size=batch_size,
+                          update_interval=update_interval, save_dir=save_dir)
+        # TODO hvis vi skal udregne acc til ground truth
+        # print('acc:', accur(y, y_pred))
+        print('clustering time: ', (time() - t0))
+        self.bins = y_pred
+
+    def pretrain(self, x, y=None, optimizer='adam', epochs=200, batch_size=256, save_dir='results/temp'):
+        print('...Pretraining...')
+        self.autoencoder.compile(optimizer=optimizer, loss='mse')
+
+        csv_logger = keras.callbacks.CSVLogger(save_dir + '/pretrain_log.csv')
+        cb = [csv_logger]
+        if y is not None:
+            class PrintACC(keras.callbacks.Callback):
+                def __init__(self, x, y):
+                    self.x = x
+                    self.y = y
+                    super(PrintACC, self).__init__()
+
+                def on_epoch_end(self, epoch, logs=None):
+                    if int(epochs / 10) != 0 and epoch % int(epochs / 10) != 0:
+                        return
+                    feature_model = keras.models.Model(self.model.input,
+                                                       self.model.get_layer(
+                                                           'encoder_%d' % (int(len(self.model.layers) / 2) - 1)).output)
+                    features = feature_model.predict(self.x)
+                    km = KMeans(n_clusters=len(np.unique(self.y)), n_init=20, n_jobs=4)
+                    y_pred = km.fit_predict(features)
+                    # print()
+                    print(' ' * 8 + '|==>  acc: %.4f,  nmi: %.4f  <==|'
+                          % (accur(self.y, y_pred), measure_nmi(self.y, y_pred)))
+
+            cb.append(PrintACC(x, y))
+
+        # begin pretraining
+        t0 = time()
+        self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs, callbacks=cb)
+        print('Pretraining time: %ds' % round(time() - t0))
+        self.autoencoder.save_weights(save_dir + '/ae_weights.h5')
+        print('Pretrained weights are saved to %s/ae_weights.h5' % save_dir)
+        self.pretrained = True
+
+    def extract_features(self, x):
+        return self.encoder.predict(x)
+
+    def compile(self, optimizer='sgd', loss='kld'):
+        self.model.compile(optimizer=optimizer, loss=loss)
+
+    def define_model(self, dims, act='relu', init='glorot_uniform'):
+        """
+            Fully connected auto-encoder model, symmetric.
+            Arguments:
+                dims: list of number of units in each layer of encoder. dims[0] is input dim, dims[-1] is units in hidden layer.
+                    The decoder is symmetric with encoder. So number of layers of the auto-encoder is 2*len(dims)-1
+                act: activation, not applied to Input, Hidden and Output layers
+            return:
+                (ae_model, encoder_model), Model of autoencoder and model of encoder
+            """
+
+        n_stacks = len(dims) - 1
+        # input
+        x = keras.layers.Input(shape=(dims[0],), name='input')
+        h = x
+
+        # internal layers in encoder
+        for i in range(n_stacks - 1):
+            h = keras.layers.Dense(dims[i + 1], activation=act, kernel_initializer=init, name='encoder_%d' % i)(h)
+
+        # hidden layer
+        h = keras.layers.Dense(dims[-1], kernel_initializer=init, name='encoder_%d' % (n_stacks - 1))(
+            h)  # hidden layer, features are extracted from here
+
+        y = h
+        # internal layers in decoder
+        for i in range(n_stacks - 1, 0, -1):
+            y = keras.layers.Dense(dims[i], activation=act, kernel_initializer=init, name='decoder_%d' % i)(y)
+
+        # output
+        y = keras.layers.Dense(dims[0], kernel_initializer=init, name='decoder_0')(y)
+
+        return keras.models.Model(inputs=x, outputs=y, name='AE'), keras.models.Model(inputs=x, outputs=h,
+                                                                                      name='encoder')
+
 
 
 def create_binner(split_value, binner_type, clustering_method, contig_ids, feature_matrix):
