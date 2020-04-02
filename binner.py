@@ -561,5 +561,7 @@ binner_dict = {
 
 clustering_algorithms_dict = {
     'KMeans': clustering_methods.clustering_k_means,
-    'Random': clustering_methods.random_cluster
+    'Random': clustering_methods.random_cluster,
+    'KMeans_gpu': clustering_methods.KMEANS_GPU,
+    'DBSCAN_gpu': clustering_methods.DBSCAN_GPU
 }
