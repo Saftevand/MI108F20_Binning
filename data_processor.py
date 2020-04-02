@@ -8,6 +8,7 @@ import cuml
 import cudf
 import pandas as pd
 import binner
+import matplotlib.pyplot as plt
 
 def get_tnfs(path):
     with vamb.vambtools.Reader(path, 'rb') as filehandle:
@@ -15,10 +16,37 @@ def get_tnfs(path):
 
     return tnfs, contig_names
 
-def write_training_plots(binner_instance, out_dir):
+def plot_cluster_optimizing_loss(list_of_loss):
+    plot = plt.plot(list_of_loss).figure
+    plt.title('Clustering loss')
+    plt.ylabel('Loss value')
+    plt.xlabel('No. epoch')
+    plt.legend(loc="upper left")
+    return plot
+
+
+def plot_history_obj(history_obj, metric):
+    plot = plt.plot(history_obj.history[metric]).figure
+    plt.title(f'Finetuning {metric} .')
+    plt.ylabel(metric)
+    plt.xlabel('epoch')
+    plt.legend(loc='upper left')
+    return plot
+
+def write_training_plots(binner_instance:binner.DEC_Binner_Xifeng, out_dir):
 
     if binner_instance is binner.DEC_Binner_Xifeng:
-        1+1
+
+        # plots pretraining loss
+        plot1 = plot_history_obj(binner_instance.finetune_history,'loss')
+        # plots cluster loss
+        plot2 = plot_cluster_optimizing_loss(binner_instance.cluster_loss_list)
+
+        plot1.savefig(out_dir)
+        plot2.savefig(out_dir)
+        plt.close(plot1)
+        plt.close(plot2)
+
     elif binner_instance is binner.Greedy_pretraining_DEC:
         1+1
     elif binner_instance is binner.Sequential_Binner:

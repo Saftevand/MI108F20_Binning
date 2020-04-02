@@ -106,6 +106,8 @@ class DEC(Binner):
         self.model = None
         self.autoencoder = None
         self.n_clusters = None
+        self.finetune_history = None
+        self.cluster_loss_list = None
 
     def do_binning(self) -> [[]]:
         pass
@@ -208,8 +210,7 @@ class Greedy_pretraining_DEC(DEC):
         super().__init__(split_value=split_value, clustering_method=clustering_method, feature_matrix=feature_matrix, contig_ids=contig_ids)
         self.true_bins = None
         self.layers_history = []
-        self.finetune_history = None
-        self.cluster_loss_list = None
+
 
     def do_binning(self, init='glorot_uniform', pretrain_optimizer=keras.optimizers.Adam(learning_rate=0.001),
                    n_clusters=10, update_interval=140, pretrain_epochs=10, finetune_epochs=100, batch_size=128,
@@ -431,8 +432,7 @@ class DEC_Binner_Xifeng(DEC):
         super().__init__(split_value=split_value, contig_ids=contig_ids, feature_matrix=feature_matrix,
                          clustering_method=clustering_method)
         self._input_layer_size = None
-        self.cluster_loss_list = None
-        self.pretrain_hist = None
+
 
     def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
                    pretrain_epochs=200, batch_size=128, save_dir='results', tolerance_threshold=1e-3,
@@ -494,7 +494,7 @@ class DEC_Binner_Xifeng(DEC):
 
         # begin pretraining
         t0 = time()
-        self.pretrain_hist = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs, callbacks=cb)
+        self.finetune_history = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs, callbacks=cb)
         print('Pretraining time: %ds' % round(time() - t0))
         self.autoencoder.save_weights(save_dir + '/ae_weights.h5')
         print('Pretrained weights are saved to %s/ae_weights.h5' % save_dir)

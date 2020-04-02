@@ -95,7 +95,7 @@ def simon_main(args):
         plt.legend(loc='upper left')
         plt.show()
         count += 1
-    '''
+    
     plt.plot(binner_instance.pretrain_hist.history['loss'])
     plt.title(f'Finetune loss.')
     plt.ylabel('loss')
@@ -109,7 +109,7 @@ def simon_main(args):
     plt.xlabel('No. epoch')
     plt.legend(loc="upper left")
     plt.show()
-
+    '''
     results = binner_instance.get_assignments()
 
     data_processor.write_bins_to_file(results)
