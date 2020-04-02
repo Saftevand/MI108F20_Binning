@@ -36,7 +36,7 @@ def get_featurematrix(read_path, bam_path):
         if (load_data):
             feature_matrix = np.load('vamb_tnfs.npy')
         else:
-            feature_matrix, contig_ids = get_tnfs()
+            feature_matrix, contig_ids = get_tnfs(read_path)
 
     return feature_matrix, contig_ids
 
