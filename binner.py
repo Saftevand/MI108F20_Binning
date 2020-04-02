@@ -214,13 +214,13 @@ class Greedy_pretraining_DEC(DEC):
     def do_binning(self, init='glorot_uniform', pretrain_optimizer=keras.optimizers.Adam(learning_rate=0.001),
                    n_clusters=10, update_interval=140, pretrain_epochs=10, finetune_epochs=100, batch_size=128,
                    save_dir='results', tolerance_threshold=1e-3, max_iterations=200, true_bins=None,
-                   neuron_list=[500, 500, 2000, 10]):
+                   neuron_list=[500, 500, 2000, 10], verbose=1, pretrain_loss='mean_squared_error'):
 
         self.true_bins = true_bins
         self.n_clusters = n_clusters
 
         # layerwise and finetuned encoder
-        self.greedy_pretraining(pretrain_epochs=pretrain_epochs, finetune_epochs=finetune_epochs, pretrain_optimizer=pretrain_optimizer, init=init, neuron_list=neuron_list)
+        self.greedy_pretraining(loss_function=pretrain_loss, pretrain_epochs=pretrain_epochs, finetune_epochs=finetune_epochs, pretrain_optimizer=pretrain_optimizer, init=init, neuron_list=neuron_list, verbose=verbose)
 
         # Insert clustering layer using KLD error
         clustering_layer = ClusteringLayer(self.n_clusters, name='clustering')(self.encoder.output)
@@ -240,8 +240,9 @@ class Greedy_pretraining_DEC(DEC):
         print('ari:', measure_ari(self.true_bins, y_pred))
         self.bins = y_pred
 
-    def greedy_pretraining(self, pretrain_optimizer, loss_function=keras.losses.binary_crossentropy, lr=0.01, finetune_epochs=10,
-                           pretrain_epochs=10, neuron_list=[500, 500, 2000, 10], input_shape=None, dropout_rate=0.2, verbose=1, activation='relu', init='glorot_uniform'):
+    def greedy_pretraining(self, pretrain_optimizer, loss_function='mean_squared_error', lr=0.01, finetune_epochs=10,
+                           pretrain_epochs=10, neuron_list=[500, 500, 2000, 10], input_shape=None, dropout_rate=0.2,
+                           verbose=1, activation='relu', init='glorot_uniform'):
         if input_shape is None:
             # feature vector size
             input_shape = self.x_train.shape[1]
@@ -277,13 +278,15 @@ class Greedy_pretraining_DEC(DEC):
 
         # add and train more layers
         full_model = self.add_and_fit_layers(loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list,
-                                             dropout_rate, trained_encoder, input, verbose, pretrain_optimizer, activation, init)
+                                             dropout_rate, trained_encoder, input, verbose, pretrain_optimizer,
+                                             activation, init)
 
         # finetune_model and return history
 
         print(f'Finetuning final model for {finetune_epochs} epochs')
 
-        self.finetune_history = full_model.fit(x=self.x_train, y=self.x_train, epochs=finetune_epochs, batch_size=256, verbose=verbose)
+        self.finetune_history = full_model.fit(x=self.x_train, y=self.x_train, epochs=finetune_epochs, batch_size=256,
+                                               verbose=verbose)
 
         # Saving full autoencoder because why not?
         self.autoencoder = keras.models.clone_model(full_model)
@@ -425,13 +428,16 @@ class Greedy_pretraining_DEC(DEC):
 
 class DEC_Binner_Xifeng(DEC):
     def __init__(self, split_value, contig_ids, clustering_method, feature_matrix):
-        super().__init__(split_value=split_value, contig_ids=contig_ids, feature_matrix=feature_matrix, clustering_method=clustering_method)
+        super().__init__(split_value=split_value, contig_ids=contig_ids, feature_matrix=feature_matrix,
+                         clustering_method=clustering_method)
         self._input_layer_size = None
+        self.cluster_loss_list = None
+        self.pretrain_hist = None
 
     def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
-              pretrain_epochs=200, batch_size=128, save_dir='results', tolerance_threshold=1e-3,
-              max_iterations=100):
-
+                   pretrain_epochs=200, batch_size=128, save_dir='results', tolerance_threshold=1e-3,
+                   max_iterations=100, true_bins=None):
+        self.true_bins = true_bins
         self.n_clusters = n_clusters
         self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 500, 500, 2000, 10],
                                                            act='relu', init=init)
@@ -440,7 +446,7 @@ class DEC_Binner_Xifeng(DEC):
         self.model = keras.models.Model(inputs=self.encoder.input, outputs=clustering_layer)
 
         # TODO y er labels... det har vi ikke
-        y = None
+        y = true_bins
 
         self.pretrain(x=self.x_train, y=y, optimizer=pretrain_optimizer,
                       epochs=pretrain_epochs, batch_size=batch_size,
@@ -449,13 +455,14 @@ class DEC_Binner_Xifeng(DEC):
         self.model.summary()
         t0 = time()
         self.compile(optimizer=keras.optimizers.SGD(0.01, 0.9), loss='kld')
-        y_pred = self.fit(self.x_train, y=y, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
+        y_pred, loss_list = self.fit(self.x_train, y=y, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
                           batch_size=batch_size,
                           update_interval=update_interval, save_dir=save_dir)
         # TODO hvis vi skal udregne acc til ground truth
-        # print('acc:', accur(y, y_pred))
+        print('acc:', accur(y, y_pred))
         print('clustering time: ', (time() - t0))
         self.bins = y_pred
+        self.cluster_loss_list = loss_list
 
     def pretrain(self, x, y=None, optimizer='adam', epochs=200, batch_size=256, save_dir='results/temp'):
         print('...Pretraining...')
@@ -487,7 +494,7 @@ class DEC_Binner_Xifeng(DEC):
 
         # begin pretraining
         t0 = time()
-        self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs, callbacks=cb)
+        self.pretrain_hist = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs, callbacks=cb)
         print('Pretraining time: %ds' % round(time() - t0))
         self.autoencoder.save_weights(save_dir + '/ae_weights.h5')
         print('Pretrained weights are saved to %s/ae_weights.h5' % save_dir)
