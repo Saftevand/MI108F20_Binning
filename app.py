@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 import clustering_methods
+from pathlib import Path
 
 
 def main():
@@ -116,6 +117,7 @@ def handle_input_arguments():
     if args.savepathdepth and not args.bam:
         parser.error("-sd requires -b")
 
+    Path(args.outdir).mkdir(parents=True, exist_ok=True)
 
     return args
 

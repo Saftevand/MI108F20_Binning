@@ -7,12 +7,23 @@ from collections import defaultdict
 import cuml
 import cudf
 import pandas as pd
+import binner
 
 def get_tnfs(path):
     with vamb.vambtools.Reader(path, 'rb') as filehandle:
         tnfs, contig_names, lengths_arr = vamb.parsecontigs.read_contigs(filehandle, minlength=4)
 
     return tnfs, contig_names
+
+def write_training_plots(binner_instance, out_dir):
+
+    if binner_instance is binner.DEC_Binner_Xifeng:
+        1+1
+    elif binner_instance is binner.Greedy_pretraining_DEC:
+        1+1
+    elif binner_instance is binner.Sequential_Binner:
+        1+1
+
 
 
 def get_depth(paths):
