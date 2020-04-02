@@ -7,7 +7,6 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 import clustering_methods
-import matplotlib.pyplot as plt
 
 
 def main():
