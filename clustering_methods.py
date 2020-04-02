@@ -3,8 +3,8 @@ from random import randint
 import math
 import pandas as pd
 import abc
-
-
+import cuml
+import cudf
 
 
 class clustering_method:
@@ -129,11 +129,41 @@ class clustering_k_means(clustering_method):
         self.clustered_data = result
         return self.clustered_data
 
+class DBSCAN_GPU(clustering_method):
+    def __init__(self, eps=1.0, min_samples=1): #eps skal være en float værdi
+        super().__init__()
+        self.eps = eps
+        self.min_samples = min_samples
+
+    def do_clustering(self, dataset, max_iterations=5):
+        dbscan = cuml.cluster.DBSCAN(eps=self.eps, min_samples=self.min_samples)
+        dbscan.fit(dataset)
+        return dbscan.labels_
+
+    def get_loss(self):
+        pass
+
+class KMEANS_GPU(clustering_method):
+    def __init__(self, k_amount_of_clusters=5):
+        super().__init__()
+        self.k = k_amount_of_clusters
+
+    def do_clustering(self, dataset, max_iterations=5): #Dataset skal være på cuDF format
+        kmeans = cuml.cluster.KMeans(n_clusters=self.k, max_iter=max_iterations, n_gpu=-1)
+        result = kmeans.fit(dataset)
+        return result.labels_
+
+    def get_loss(self):
+        pass
+
+
 def get_clustering(cluster):
 
     return clustering_algorithms_dict[cluster]
 
 clustering_algorithms_dict = {
     'KMeans': clustering_k_means,
-    'Random': random_cluster
+    'Random': random_cluster,
+    'KMeans_gpu': KMEANS_GPU,
+    'DBSCAN_gpu': DBSCAN_GPU
 }

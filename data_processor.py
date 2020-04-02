@@ -4,6 +4,9 @@ from sklearn.preprocessing import normalize
 import math
 import datetime
 from collections import defaultdict
+import cuml
+import cudf
+import pandas as pd
 
 def get_tnfs(path):
     with vamb.vambtools.Reader(path, 'rb') as filehandle:
@@ -105,3 +108,15 @@ def sort_bins_follow_input(contig_ids: [int], contig_to_bin_id: defaultdict):
     for i in contig_ids:
         var.append(contig_to_bin_id[i])
     return var
+
+def get_train_and_test_data(data, split_value=0.8):
+    x_train, x_test, y_train, y_test = cuml.model_selection.train_test_split(data, 'y', train_size=split_value)  # tror y her skal være den ene dimension i datasettet
+    return x_train, x_test, y_train, y_test
+
+def np2cudf(df):
+    # convert numpy array to cuDF dataframe
+    df = pd.DataFrame({'fea%d'%i:df[:,i] for i in range(df.shape[1])})
+    pdf = cudf.DataFrame()
+    for c,column in enumerate(df):
+      pdf[str(c)] = df[column]
+    return pdf
