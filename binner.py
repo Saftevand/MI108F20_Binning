@@ -27,18 +27,20 @@ class Binner(abc.ABC):
 
 
 class Sequential_Binner(Binner):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix):
+        super().__init__(contig_ids=contig_ids, clustering_method=clustering_method, feature_matrix=feature_matrix, split_value=split_value)
         self._input_layer_size = None
         self.decoder = None
+        self.full_autoencoder = None
 
     def do_binning(self):
-        self.full_AE_train_history, full_autoencoder = self.self.train()
+        self.full_AE_train_history, self.full_autoencoder = self.self.train()
+        return self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix), self.contig_ids)
 
     def _encoder(self):
         if self.encoder is not None:
             return self.encoder
-        self._input_layer_size = self.x_train.sample(1).size
+        self._input_layer_size = len(self.x_train[1])
 
         stacked_encoder = keras.models.Sequential([
             keras.layers.Dense(500, activation="selu", input_shape=[self._input_layer_size, ],
@@ -188,7 +190,7 @@ class Greedy_pretraining_DEC(DEC):
         # Special fit method defined in DEC class
         y_pred, self.cluster_loss_list = self.fit(self.x_train, y=None, tolerance_threshold=tolerance_threshold,
                                                   maxiter=max_iterations, batch_size=batch_size,
-                                                  update_interval=update_interval, save_dir=save_dir)
+                                                  update_interval=update_interval)
         self.bins = y_pred
 
     def greedy_pretraining(self, pretrain_optimizer, loss_function='mean_squared_error', lr=0.01, finetune_epochs=10,

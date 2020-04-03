@@ -47,7 +47,7 @@ def plot_layerwise(history_list):
     return list_of_plots
 
 
-def write_training_plots(binner_instance: binner.Binner, out_dir):
+def write_training_plots(binner_instance, out_dir):
 
     if binner_instance is binner.DEC_Binner_Xifeng:
         # plots pretraining loss
