@@ -26,7 +26,7 @@ def main():
 
     feature_matrix, contig_ids = data_processor.get_featurematrix(args)
 
-    binner_instance = binner.create_binner(split_value=1, clustering_method=args.clustering,
+    binner_instance = binner.create_binner(split_value=0.8, clustering_method=args.clustering,
                                            binner_type=args.binnertype, feature_matrix=feature_matrix,
                                            contig_ids=contig_ids)
 

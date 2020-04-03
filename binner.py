@@ -9,12 +9,13 @@ from time import time
 
 
 class Binner(abc.ABC):
-    def __init__(self, contig_ids, clustering_method, split_value, feature_matrix = None):
+    def __init__(self, contig_ids, clustering_method, split_value, feature_matrix=None):
         self.feature_matrix = feature_matrix
         self.bins = None
         self.contig_ids = contig_ids
         self.clustering_method = clustering_method
-        self.x_train, x_valid = data_processor.get_train_and_validation_data(feature_matrix=self.feature_matrix, split_value=split_value)
+        self.x_train, x_valid = data_processor.get_train_and_validation_data(feature_matrix=self.feature_matrix,
+                                                                             split_value=split_value)
         self.encoder = None
         self.full_AE_train_history = None
 
@@ -28,7 +29,8 @@ class Binner(abc.ABC):
 
 class Sequential_Binner(Binner):
     def __init__(self, split_value, contig_ids, clustering_method, feature_matrix):
-        super().__init__(contig_ids=contig_ids, clustering_method=clustering_method, feature_matrix=feature_matrix, split_value=split_value)
+        super().__init__(contig_ids=contig_ids, clustering_method=clustering_method, feature_matrix=feature_matrix,
+                         split_value=split_value)
         self._input_layer_size = None
         self.decoder = None
         self.full_autoencoder = None
@@ -82,7 +84,8 @@ class Sequential_Binner(Binner):
 
 class DEC(Binner):
     def __init__(self, split_value, contig_ids, feature_matrix, clustering_method):
-        super().__init__(split_value=split_value, contig_ids=contig_ids, feature_matrix=feature_matrix, clustering_method=clustering_method)
+        super().__init__(split_value=split_value, contig_ids=contig_ids, feature_matrix=feature_matrix,
+                         clustering_method=clustering_method)
         self.model = None
         self.autoencoder = None
         self.n_clusters = None
@@ -100,8 +103,7 @@ class DEC(Binner):
         weight = q ** 2 / q.sum(0)
         return (weight.T / weight.sum(1)).T
 
-    def fit(self, x, y=None, maxiter=2e4, batch_size=258, tolerance_threshold=1e-3,
-            update_interval=150):
+    def fit(self, x, y=None, maxiter=2e4, batch_size=258, tolerance_threshold=1e-3, update_interval=150):
 
         loss_list = []
 
@@ -167,9 +169,9 @@ class DEC(Binner):
 
 class Greedy_pretraining_DEC(DEC):
     def __init__(self, split_value, clustering_method, feature_matrix, contig_ids):
-        super().__init__(split_value=split_value, clustering_method=clustering_method, feature_matrix=feature_matrix, contig_ids=contig_ids)
+        super().__init__(split_value=split_value, clustering_method=clustering_method, feature_matrix=feature_matrix,
+                         contig_ids=contig_ids)
         self.layers_history = []
-
 
     def do_binning(self, init='glorot_uniform', pretrain_optimizer=keras.optimizers.Adam(learning_rate=0.001),
                    n_clusters=10, update_interval=140, pretrain_epochs=10, finetune_epochs=100, batch_size=128,
@@ -178,7 +180,9 @@ class Greedy_pretraining_DEC(DEC):
         self.n_clusters = n_clusters
 
         # layerwise and finetuned encoder
-        self.greedy_pretraining(loss_function=pretrain_loss, pretrain_epochs=pretrain_epochs, finetune_epochs=finetune_epochs, pretrain_optimizer=pretrain_optimizer, init=init, neuron_list=neuron_list, verbose=verbose)
+        self.greedy_pretraining(loss_function=pretrain_loss, pretrain_epochs=pretrain_epochs,
+                                finetune_epochs=finetune_epochs, pretrain_optimizer=pretrain_optimizer, init=init,
+                                neuron_list=neuron_list, verbose=verbose)
 
         # Insert clustering layer using KLD error
         clustering_layer = ClusteringLayer(self.n_clusters, name='clustering')(self.encoder.output)
@@ -218,9 +222,8 @@ class Greedy_pretraining_DEC(DEC):
 
         model.compile(loss=loss_function, optimizer=pretrain_optimizer, metrics=['accuracy'])
 
-        #model.fit(x=self.x_train, y=self.x_train, epochs=pretrain_epochs, validation_data=[self.x_valid, self.x_valid], verbose=verbose)
-
-        hist = model.fit(x=self.x_train, y=self.x_train, epochs=pretrain_epochs, verbose=verbose)
+        hist = model.fit(x=self.x_train, y=self.x_train, epochs=pretrain_epochs, verbose=verbose,
+                         validation_data=[self.x_valid, self.x_valid])
 
         self.layers_history.append(hist)
 
@@ -238,8 +241,9 @@ class Greedy_pretraining_DEC(DEC):
 
         print(f'Finetuning final model for {finetune_epochs} epochs')
 
-        self.full_AE_train_history = full_model.fit(x=self.x_train, y=self.x_train, epochs=finetune_epochs, batch_size=256,
-                                               verbose=verbose)
+        self.full_AE_train_history = full_model.fit(x=self.x_train, y=self.x_train, epochs=finetune_epochs,
+                                                    batch_size=256, verbose=verbose,
+                                                    validation_data=[self.x_valid, self.x_valid])
 
         # Saving full autoencoder because why not?
         self.autoencoder = keras.models.clone_model(full_model)
@@ -253,14 +257,14 @@ class Greedy_pretraining_DEC(DEC):
 
         self.encoder = full_encoder
 
-
     def add_and_fit_layers(self, loss_function, lr, pretrain_epochs, decoder_layer_list, neuron_list, dropout_rate,
                            current_encoder_stack, input, verbose, pretrain_optimizer, activation, init):
 
         which_layer = len(neuron_list)
 
         if which_layer == 0:
-            return self.combine_encoder_decoder(current_encoder_stack, decoder_layer_list, input, loss_function, pretrain_optimizer)
+            return self.combine_encoder_decoder(current_encoder_stack, decoder_layer_list, input, loss_function,
+                                                pretrain_optimizer)
 
         print(f'Adding and training another layer for {pretrain_epochs} epochs')
 
@@ -296,7 +300,8 @@ class Greedy_pretraining_DEC(DEC):
         # Compile + fit
         model = keras.models.Model(inputs=input_new_layer, outputs=new_dec_out)
         model.compile(loss=loss_function, optimizer=pretrain_optimizer, metrics=['accuracy'])
-        hist = model.fit(x=encoded_data_train, y=encoded_data_train, epochs=pretrain_epochs, verbose=verbose)
+        hist = model.fit(x=encoded_data_train, y=encoded_data_train, epochs=pretrain_epochs, verbose=verbose,
+                         validation_data=[self.x_valid, self.x_valid])
 
         self.layers_history.append(hist)
 
@@ -385,7 +390,6 @@ class DEC_Binner_Xifeng(DEC):
                          clustering_method=clustering_method)
         self._input_layer_size = None
 
-
     def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
                    pretrain_epochs=200, batch_size=128, tolerance_threshold=1e-3,
                    max_iterations=100, true_bins=None):
@@ -415,7 +419,8 @@ class DEC_Binner_Xifeng(DEC):
 
         # begin pretraining
         t0 = time()
-        self.full_AE_train_history = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs)
+        self.full_AE_train_history = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs,
+                                                          validation_data=[self.x_valid, self.x_valid])
         print('Pretraining time: %ds' % round(time() - t0))
 
         # TODO Save weights of pretrained model
