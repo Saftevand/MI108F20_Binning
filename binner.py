@@ -16,7 +16,7 @@ class Binner(abc.ABC):
         self.bins = None
         self.contig_ids = contig_ids
         self.clustering_method = clustering_method
-        self.x_train, x_valid = data_processor.get_train_and_validation_data(feature_matrix=self.feature_matrix,
+        self.x_train, self.x_valid = data_processor.get_train_and_validation_data(feature_matrix=self.feature_matrix,
                                                                              split_value=split_value)
         self.encoder = None
         self.full_AE_train_history = None
@@ -128,7 +128,7 @@ class DEC(Binner):
 
         # Tensorboard setup - run board manuel
         log_dir = f'{self.log_dir}_cluster_training_{int(time())}'
-        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, batch_size=batch_size)
         tensorboard_callback.set_model(self.model)
 
         def named_logs(model, logs):
@@ -414,7 +414,7 @@ class DEC_Binner_Xifeng(DEC):
         self.log_dir = f'{self.log_dir}/DEC_XIFENG'
 
     def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
-                   pretrain_epochs=200, batch_size=128, tolerance_threshold=1e-3,
+                   pretrain_epochs=10, batch_size=128, tolerance_threshold=1e-3,
                    max_iterations=100, true_bins=None):
         self.n_clusters = n_clusters
         self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 500, 500, 2000, 10],
