@@ -8,7 +8,7 @@ import cuml
 import cudf
 import pandas as pd
 import binner
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 def get_tnfs(path):
     with vamb.vambtools.Reader(path, 'rb') as filehandle:
