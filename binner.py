@@ -107,7 +107,7 @@ class DEC(Binner):
         weight = q ** 2 / q.sum(0)
         return (weight.T / weight.sum(1)).T
 
-    def fit(self, log_dir, x, y=None, maxiter=2e4, batch_size=258, tolerance_threshold=1e-3, update_interval=150):
+    def fit(self, x, y=None, maxiter=2e4, batch_size=258, tolerance_threshold=1e-3, update_interval=150):
 
         loss_list = []
 
@@ -214,7 +214,7 @@ class Greedy_pretraining_DEC(DEC):
         self.model.compile(optimizer=keras.optimizers.SGD(lr=0.01), loss='kld')
 
         # Special fit method defined in DEC class
-        y_pred, self.cluster_loss_list = self.fit(self.x_train, y=None, tolerance_threshold=tolerance_threshold,
+        y_pred, self.cluster_loss_list = self.fit(self.feature_matrix, y=None, tolerance_threshold=tolerance_threshold,
                                                   maxiter=max_iterations, batch_size=batch_size,
                                                   update_interval=update_interval)
         self.bins = y_pred
@@ -429,7 +429,7 @@ class DEC_Binner_Xifeng(DEC):
         self.model.summary()
         t0 = time()
         self.compile(optimizer=keras.optimizers.SGD(0.01, 0.9), loss='kld')
-        y_pred, loss_list = self.fit(self.x_train, y=None, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
+        y_pred, loss_list = self.fit(x=self.feature_matrix, y=None, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
                           batch_size=batch_size, update_interval=update_interval)
 
         print('clustering time: ', (time() - t0))
