@@ -17,40 +17,70 @@ def get_tnfs(path):
     return tnfs, contig_names
 
 def plot_cluster_optimizing_loss(list_of_loss):
-    plot = plt.plot(list_of_loss).figure
+    plt.plot(list_of_loss)
     plt.title('Clustering loss')
     plt.ylabel('Loss value')
-    plt.xlabel('No. epoch')
+    plt.xlabel('No. batch?? TODO')
     plt.legend(loc="upper left")
-    return plot
+    return plt.gcf()  # Get Current Figure
 
 
 def plot_history_obj(history_obj, metric):
-    plot = plt.plot(history_obj.history[metric]).figure
-    plt.title(f'Finetuning {metric} .')
+    plt.plot(history_obj.history[metric])
+    plt.title(f'Finetuning {metric}.')
     plt.ylabel(metric)
     plt.xlabel('epoch')
     plt.legend(loc='upper left')
-    return plot
+    return plt.gcf()  # Get Current Figure
 
-def write_training_plots(binner_instance:binner.DEC_Binner_Xifeng, out_dir):
+
+def plot_layerwise(history_list):
+    list_of_plots = []
+    counter = 1
+    for hist in history_list:
+        plt.plot(hist.history['loss'])
+        plt.title(f'layer {counter} loss.')
+        plt.ylabel('loss')
+        plt.xlabel('epoch')
+        plt.legend(loc='upper left')
+        list_of_plots.append(plt.gcf())
+    return list_of_plots
+
+
+def write_training_plots(binner_instance: binner.Binner, out_dir):
 
     if binner_instance is binner.DEC_Binner_Xifeng:
-
         # plots pretraining loss
-        plot1 = plot_history_obj(binner_instance.finetune_history,'loss')
+        plot1 = plot_history_obj(binner_instance.full_AE_train_history, 'loss')
         # plots cluster loss
         plot2 = plot_cluster_optimizing_loss(binner_instance.cluster_loss_list)
 
-        plot1.savefig(out_dir)
-        plot2.savefig(out_dir)
+        plot1.savefig(f'{out_dir}/pretrain_loss')
+        plot2.savefig(f'{out_dir}/cluster_fit_loss')
         plt.close(plot1)
         plt.close(plot2)
 
     elif binner_instance is binner.Greedy_pretraining_DEC:
-        1+1
+        # plots layerwise training
+        plot_list = plot_layerwise(binner_instance.layers_history)
+        # plots pretraining loss
+        plot1 = plot_history_obj(binner_instance.full_AE_train_history, 'loss')
+        # plots cluster loss
+        plot2 = plot_cluster_optimizing_loss(binner_instance.cluster_loss_list)
+
+        layernr = 1
+        for plot in plot_list:
+            plot.savefig(f'{out_dir}/layer_{layernr}_loss')
+
+        plot1.savefig(f'{out_dir}/pretrain_loss')
+        plot2.savefig(f'{out_dir}/cluster_fit_loss')
+        plt.close()
+
     elif binner_instance is binner.Sequential_Binner:
-        1+1
+        # plots AE training loss
+        plot1 = plot_history_obj(binner_instance.full_AE_train_history, 'loss')
+        plot1.savefig(f'{out_dir}/pretrain_loss')
+        plt.close(plot1)
 
 
 
@@ -103,50 +133,6 @@ def write_bins_to_file(bins):
     with open('binning_results.tsv', 'w') as output:
         output.write(bins_string)
 
-
-def get_unique_ids_truth(path):
-    with open(path, 'r') as input_file:
-        # skips headers
-        for _ in range(0,4):
-            next(input_file)
-
-        ids = []
-        contig_ids = []
-        binid_to_int = defaultdict()
-        contigid_to_binid = defaultdict()
-
-        new_id = 0
-        for line in input_file:
-            line_elems = line.split('\t')
-            bin_id = line_elems[1]
-            cont_name = line_elems[0]
-            contig_ids.append(line_elems[0])
-
-            if bin_id in binid_to_int:
-                id_int = binid_to_int[bin_id]
-
-                # used for mapping contig id to bin id
-                contigid_to_binid[cont_name] = id_int
-            else:
-                # new bin id
-                binid_to_int[bin_id] = new_id
-                id_int = new_id
-
-                # used for mapping contig id to bin id
-                contigid_to_binid[cont_name] = id_int
-
-                new_id += 1
-
-            ids.append(id_int)
-
-    return ids, contig_ids, contigid_to_binid
-
-
-def sort_bins_follow_input(contig_ids: [int], contig_to_bin_id: defaultdict):
-    var = []
-    for i in contig_ids:
-        var.append(contig_to_bin_id[i])
-    return var
 
 def get_train_and_test_data(data, split_value=0.8):
     x_train, x_test, y_train, y_test = cuml.model_selection.train_test_split(data, 'y', train_size=split_value)  # tror y her skal være den ene dimension i datasettet

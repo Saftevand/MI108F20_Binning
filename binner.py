@@ -7,32 +7,6 @@ from clustering_layer_xifeng import ClusteringLayer
 from sklearn.cluster import KMeans
 from time import time
 
-from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
-
-measure_nmi = normalized_mutual_info_score
-measure_ari = adjusted_rand_score
-
-def accur(y_true, y_pred):
-    """
-    TODO maybe not needed when up and running -Simon
-    Calculate clustering accuracy. Require scikit-learn installed
-    # Arguments
-        y: true labels, numpy.array with shape `(n_samples,)`
-        y_pred: predicted labels, numpy.array with shape `(n_samples,)`
-    # Return
-        accuracy, in [0,1]
-    """
-    y_true = np.asarray(y_true)
-    y_true = y_true.astype(np.int64)
-    assert y_pred.size == y_true.size
-    D = max(y_pred.max(), y_true.max()) + 1
-    w = np.zeros((D, D), dtype=np.int64)
-    for i in range(y_pred.size):
-        w[y_pred[i], y_true[i]] += 1
-    from sklearn.utils.linear_assignment_ import linear_assignment
-    ind = linear_assignment(w.max() - w)
-    return sum([w[i, j] for i, j in ind]) * 1.0 / y_pred.size
-
 
 class Binner(abc.ABC):
     def __init__(self, contig_ids, clustering_method, split_value, feature_matrix = None):
@@ -42,6 +16,7 @@ class Binner(abc.ABC):
         self.clustering_method = clustering_method
         self.x_train, x_valid = data_processor.get_train_and_validation_data(feature_matrix=self.feature_matrix, split_value=split_value)
         self.encoder = None
+        self.full_AE_train_history = None
 
     @abc.abstractmethod
     def do_binning(self) -> [[]]:
@@ -57,8 +32,11 @@ class Sequential_Binner(Binner):
         self._input_layer_size = None
         self.decoder = None
 
+    def do_binning(self):
+        self.full_AE_train_history, full_autoencoder = self.self.train()
+
     def _encoder(self):
-        if (self.encoder is not None):
+        if self.encoder is not None:
             return self.encoder
         self._input_layer_size = self.x_train.sample(1).size
 
@@ -72,7 +50,7 @@ class Sequential_Binner(Binner):
         return stacked_encoder
 
     def _decoder(self):
-        if (self.decoder is not None):
+        if self.decoder is not None:
             return self.decoder
 
         stacked_decoder = keras.models.Sequential([
@@ -106,7 +84,6 @@ class DEC(Binner):
         self.model = None
         self.autoencoder = None
         self.n_clusters = None
-        self.finetune_history = None
         self.cluster_loss_list = None
 
     def do_binning(self) -> [[]]:
@@ -122,7 +99,7 @@ class DEC(Binner):
         return (weight.T / weight.sum(1)).T
 
     def fit(self, x, y=None, maxiter=2e4, batch_size=258, tolerance_threshold=1e-3,
-            update_interval=150, save_dir='./results/temp'):
+            update_interval=150):
 
         loss_list = []
 
@@ -142,13 +119,6 @@ class DEC(Binner):
         self.model.get_layer(name='clustering').set_weights([kmeans.cluster_centers_])
 
         # Step 2: deep clustering
-        # logging file
-        import csv
-        logfile = open(save_dir + '/dec_log.csv', 'w')
-        logwriter = csv.DictWriter(logfile, fieldnames=['iter', 'acc', 'nmi', 'ari', 'loss'])
-        logwriter.writeheader()
-
-        loss = 0
         index = 0
         index_array = np.arange(x.shape[0])
         for ite in range(int(maxiter)):
@@ -158,14 +128,6 @@ class DEC(Binner):
 
                 # evaluate the clustering performance
                 y_pred = q.argmax(1)
-                if y is not None:
-                    acc = np.round(accur(y, y_pred), 5)
-                    nmi = np.round(measure_nmi(y, y_pred), 5)
-                    ari = np.round(measure_ari(y, y_pred), 5)
-                    loss = np.round(loss, 5)
-                    logdict = dict(iter=ite, acc=acc, nmi=nmi, ari=ari, loss=loss)
-                    logwriter.writerow(logdict)
-                    print('Iter %d: acc = %.5f, nmi = %.5f, ari = %.5f' % (ite, acc, nmi, ari), ' ; loss=', loss)
 
                 # check stop criterion
                 delta_label = np.sum(y_pred != y_pred_last).astype(np.float32) / y_pred.shape[0]
@@ -173,16 +135,13 @@ class DEC(Binner):
                 if ite > 0 and delta_label < tolerance_threshold:
                     print('delta_label ', delta_label, '< tol ', tolerance_threshold)
                     print('Reached tolerance threshold. Stopping training.')
-                    logfile.close()
                     break
-
+            # Commented out by Xifeng himself
             # train on batch
             # if index == 0:
             #     np.random.shuffle(index_array)
             idx = index_array[index * batch_size: min((index + 1) * batch_size, x.shape[0])]
-            xidx = x[idx]
-            pidx = p[idx]
-            loss = self.model.train_on_batch(x=xidx, y=pidx)
+            loss = self.model.train_on_batch(x=x[idx], y=p[idx])
 
             #saving loss for display later
             loss_list.append(loss)
@@ -198,17 +157,15 @@ class DEC(Binner):
             ite += 1
 
         # save the trained model
-        logfile.close()
-        print('saving model to:', save_dir + '/DEC_model_final.h5')
-        self.model.save_weights(save_dir + '/DEC_model_final.h5')
-
+        # logfile.close()
+        # print('saving model to:', save_dir + '/DEC_model_final.h5')
+        # self.model.save_weights(save_dir + '/DEC_model_final.h5')
         return y_pred, loss_list
 
 
 class Greedy_pretraining_DEC(DEC):
     def __init__(self, split_value, clustering_method, feature_matrix, contig_ids):
         super().__init__(split_value=split_value, clustering_method=clustering_method, feature_matrix=feature_matrix, contig_ids=contig_ids)
-        self.true_bins = None
         self.layers_history = []
 
 
@@ -216,8 +173,6 @@ class Greedy_pretraining_DEC(DEC):
                    n_clusters=10, update_interval=140, pretrain_epochs=10, finetune_epochs=100, batch_size=128,
                    save_dir='results', tolerance_threshold=1e-3, max_iterations=200, true_bins=None,
                    neuron_list=[500, 500, 2000, 10], verbose=1, pretrain_loss='mean_squared_error'):
-
-        self.true_bins = true_bins
         self.n_clusters = n_clusters
 
         # layerwise and finetuned encoder
@@ -231,14 +186,9 @@ class Greedy_pretraining_DEC(DEC):
         self.model.compile(optimizer=keras.optimizers.SGD(lr=0.01), loss='kld')
 
         # Special fit method defined in DEC class
-        y_pred, self.cluster_loss_list = self.fit(self.x_train, y=self.true_bins, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
-                          batch_size=batch_size,
-                          update_interval=update_interval, save_dir=save_dir)
-        # TODO hvis vi skal udregne acc til ground truth
-        print("Calculating accuracy")
-        print('acc:', accur(self.true_bins, y_pred))
-        print('nmi:', measure_nmi(self.true_bins, y_pred))
-        print('ari:', measure_ari(self.true_bins, y_pred))
+        y_pred, self.cluster_loss_list = self.fit(self.x_train, y=None, tolerance_threshold=tolerance_threshold,
+                                                  maxiter=max_iterations, batch_size=batch_size,
+                                                  update_interval=update_interval, save_dir=save_dir)
         self.bins = y_pred
 
     def greedy_pretraining(self, pretrain_optimizer, loss_function='mean_squared_error', lr=0.01, finetune_epochs=10,
@@ -286,7 +236,7 @@ class Greedy_pretraining_DEC(DEC):
 
         print(f'Finetuning final model for {finetune_epochs} epochs')
 
-        self.finetune_history = full_model.fit(x=self.x_train, y=self.x_train, epochs=finetune_epochs, batch_size=256,
+        self.full_AE_train_history = full_model.fit(x=self.x_train, y=self.x_train, epochs=finetune_epochs, batch_size=256,
                                                verbose=verbose)
 
         # Saving full autoencoder because why not?
@@ -435,9 +385,8 @@ class DEC_Binner_Xifeng(DEC):
 
 
     def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
-                   pretrain_epochs=200, batch_size=128, save_dir='results', tolerance_threshold=1e-3,
+                   pretrain_epochs=200, batch_size=128, tolerance_threshold=1e-3,
                    max_iterations=100, true_bins=None):
-        self.true_bins = true_bins
         self.n_clusters = n_clusters
         self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 500, 500, 2000, 10],
                                                            act='relu', init=init)
@@ -445,60 +394,31 @@ class DEC_Binner_Xifeng(DEC):
         clustering_layer = ClusteringLayer(self.n_clusters, name='clustering')(self.encoder.output)
         self.model = keras.models.Model(inputs=self.encoder.input, outputs=clustering_layer)
 
-        # TODO y er labels... det har vi ikke
-        y = true_bins
-
-        self.pretrain(x=self.x_train, y=y, optimizer=pretrain_optimizer,
-                      epochs=pretrain_epochs, batch_size=batch_size,
-                      save_dir=save_dir)
+        self.pretrain(x=self.x_train, optimizer=pretrain_optimizer,
+                      epochs=pretrain_epochs, batch_size=batch_size)
 
         self.model.summary()
         t0 = time()
         self.compile(optimizer=keras.optimizers.SGD(0.01, 0.9), loss='kld')
-        y_pred, loss_list = self.fit(self.x_train, y=y, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
-                          batch_size=batch_size,
-                          update_interval=update_interval, save_dir=save_dir)
-        # TODO hvis vi skal udregne acc til ground truth
-        print('acc:', accur(y, y_pred))
+        y_pred, loss_list = self.fit(self.x_train, y=None, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
+                          batch_size=batch_size, update_interval=update_interval)
+
         print('clustering time: ', (time() - t0))
         self.bins = y_pred
         self.cluster_loss_list = loss_list
 
-    def pretrain(self, x, y=None, optimizer='adam', epochs=200, batch_size=256, save_dir='results/temp'):
+    def pretrain(self, x, optimizer='adam', epochs=200, batch_size=256):
         print('...Pretraining...')
         self.autoencoder.compile(optimizer=optimizer, loss='mse')
 
-        csv_logger = keras.callbacks.CSVLogger(save_dir + '/pretrain_log.csv')
-        cb = [csv_logger]
-        if y is not None:
-            class PrintACC(keras.callbacks.Callback):
-                def __init__(self, x, y):
-                    self.x = x
-                    self.y = y
-                    super(PrintACC, self).__init__()
-
-                def on_epoch_end(self, epoch, logs=None):
-                    if int(epochs / 10) != 0 and epoch % int(epochs / 10) != 0:
-                        return
-                    feature_model = keras.models.Model(self.model.input,
-                                                       self.model.get_layer(
-                                                           'encoder_%d' % (int(len(self.model.layers) / 2) - 1)).output)
-                    features = feature_model.predict(self.x)
-                    km = KMeans(n_clusters=len(np.unique(self.y)), n_init=20, n_jobs=4)
-                    y_pred = km.fit_predict(features)
-                    # print()
-                    print(' ' * 8 + '|==>  acc: %.4f,  nmi: %.4f  <==|'
-                          % (accur(self.y, y_pred), measure_nmi(self.y, y_pred)))
-
-            cb.append(PrintACC(x, y))
-
         # begin pretraining
         t0 = time()
-        self.finetune_history = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs, callbacks=cb)
+        self.full_AE_train_history = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs)
         print('Pretraining time: %ds' % round(time() - t0))
-        self.autoencoder.save_weights(save_dir + '/ae_weights.h5')
-        print('Pretrained weights are saved to %s/ae_weights.h5' % save_dir)
-        self.pretrained = True
+
+        # TODO Save weights of pretrained model
+        # self.autoencoder.save_weights(save_dir + '/ae_weights.h5')
+        # print('Pretrained weights are saved to %s/ae_weights.h5' % save_dir)
 
     def extract_features(self, x):
         return self.encoder.predict(x)
@@ -542,13 +462,13 @@ class DEC_Binner_Xifeng(DEC):
                                                                                       name='encoder')
 
 
-
 def create_binner(split_value, binner_type, clustering_method, contig_ids, feature_matrix):
     clustering_method = get_clustering(clustering_method)
 
     binner_type = get_binner(binner_type)
 
-    binner_instance = binner_type(split_value=split_value, contig_ids=contig_ids, clustering_method=clustering_method(), feature_matrix=feature_matrix)
+    binner_instance = binner_type(split_value=split_value, contig_ids=contig_ids, clustering_method=clustering_method(),
+                                  feature_matrix=feature_matrix)
     return binner_instance
 
 
