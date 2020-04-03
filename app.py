@@ -30,7 +30,15 @@ def main():
                                            binner_type=args.binnertype, feature_matrix=feature_matrix,
                                            contig_ids=contig_ids)
 
-    binner_instance.do_binning()
+    binner_instance.do_binning(init='glorot_uniform',
+                               pretrain_optimizer='adam',
+                               n_clusters=10,
+                               update_interval=140,
+                               pretrain_epochs=1,
+                               batch_size=128,
+                               tolerance_threshold=1e-3,
+                               max_iterations=1,
+                               true_bins=None)
 
     results = binner_instance.get_assignments()
 
