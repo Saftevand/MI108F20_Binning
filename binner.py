@@ -34,7 +34,7 @@ class Sequential_Binner(Binner):
         self.full_autoencoder = None
 
     def do_binning(self):
-        self.full_AE_train_history, self.full_autoencoder = self.self.train()
+        self.full_AE_train_history, self.full_autoencoder = self.train()
         return self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix), self.contig_ids)
 
     def _encoder(self):
