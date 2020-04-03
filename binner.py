@@ -1,6 +1,7 @@
 import clustering_methods
 import abc
 import data_processor
+import tensorflow as tf
 from tensorflow import keras
 import numpy as np
 from clustering_layer_xifeng import ClusteringLayer
@@ -8,8 +9,9 @@ from sklearn.cluster import KMeans
 from time import time
 
 
+
 class Binner(abc.ABC):
-    def __init__(self, contig_ids, clustering_method, split_value, feature_matrix=None):
+    def __init__(self, contig_ids, clustering_method, split_value, log_dir, feature_matrix=None):
         self.feature_matrix = feature_matrix
         self.bins = None
         self.contig_ids = contig_ids
@@ -18,6 +20,7 @@ class Binner(abc.ABC):
                                                                              split_value=split_value)
         self.encoder = None
         self.full_AE_train_history = None
+        self.log_dir = f'{log_dir}/logs'
 
     @abc.abstractmethod
     def do_binning(self) -> [[]]:
@@ -28,12 +31,13 @@ class Binner(abc.ABC):
 
 
 class Sequential_Binner(Binner):
-    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix):
+    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix, log_dir):
         super().__init__(contig_ids=contig_ids, clustering_method=clustering_method, feature_matrix=feature_matrix,
-                         split_value=split_value)
+                         split_value=split_value, log_dir=log_dir)
         self._input_layer_size = None
         self.decoder = None
         self.full_autoencoder = None
+        self.log_dir = f'{self.log_dir}/SAE'
 
     def do_binning(self):
         self.full_AE_train_history, self.full_autoencoder = self.train()
@@ -83,9 +87,9 @@ class Sequential_Binner(Binner):
 
 
 class DEC(Binner):
-    def __init__(self, split_value, contig_ids, feature_matrix, clustering_method):
+    def __init__(self, split_value, contig_ids, feature_matrix, clustering_method, log_dir):
         super().__init__(split_value=split_value, contig_ids=contig_ids, feature_matrix=feature_matrix,
-                         clustering_method=clustering_method)
+                         clustering_method=clustering_method, log_dir=log_dir)
         self.model = None
         self.autoencoder = None
         self.n_clusters = None
@@ -103,7 +107,7 @@ class DEC(Binner):
         weight = q ** 2 / q.sum(0)
         return (weight.T / weight.sum(1)).T
 
-    def fit(self, x, y=None, maxiter=2e4, batch_size=258, tolerance_threshold=1e-3, update_interval=150):
+    def fit(self, log_dir, x, y=None, maxiter=2e4, batch_size=258, tolerance_threshold=1e-3, update_interval=150):
 
         loss_list = []
 
@@ -121,6 +125,17 @@ class DEC(Binner):
         y_pred = kmeans.fit_predict(self.encoder.predict(x))
         y_pred_last = np.copy(y_pred)
         self.model.get_layer(name='clustering').set_weights([kmeans.cluster_centers_])
+
+        # Tensorboard setup - run board manuel
+        log_dir = f'{self.log_dir}_cluster_training_{int(time())}'
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+        tensorboard_callback.set_model(self.model)
+
+        def named_logs(model, logs):
+            result = {}
+            for l in zip(model.metrics_names, logs):
+                result[l[0]] = l[1]
+            return result
 
         # Step 2: deep clustering
         index = 0
@@ -147,6 +162,9 @@ class DEC(Binner):
             idx = index_array[index * batch_size: min((index + 1) * batch_size, x.shape[0])]
             loss = self.model.train_on_batch(x=x[idx], y=p[idx])
 
+            # creates log for train_on_batch
+            tensorboard_callback.on_epoch_end(ite, named_logs(self.model, [loss]))
+
             #saving loss for display later
             loss_list.append(loss)
 
@@ -160,6 +178,9 @@ class DEC(Binner):
             '''
             ite += 1
 
+        # is this necessary?
+        tensorboard_callback.on_train_end(None)
+
         # save the trained model
         # logfile.close()
         # print('saving model to:', save_dir + '/DEC_model_final.h5')
@@ -168,10 +189,11 @@ class DEC(Binner):
 
 
 class Greedy_pretraining_DEC(DEC):
-    def __init__(self, split_value, clustering_method, feature_matrix, contig_ids):
+    def __init__(self, split_value, clustering_method, feature_matrix, contig_ids, log_dir):
         super().__init__(split_value=split_value, clustering_method=clustering_method, feature_matrix=feature_matrix,
-                         contig_ids=contig_ids)
+                         contig_ids=contig_ids, log_dir=log_dir)
         self.layers_history = []
+        self.log_dir = f'{self.log_dir}/GREEDY_DEC'
 
     def do_binning(self, init='glorot_uniform', pretrain_optimizer=keras.optimizers.Adam(learning_rate=0.001),
                    n_clusters=10, update_interval=140, pretrain_epochs=10, finetune_epochs=100, batch_size=128,
@@ -385,10 +407,11 @@ class Greedy_pretraining_DEC(DEC):
 
 
 class DEC_Binner_Xifeng(DEC):
-    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix):
+    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix, log_dir):
         super().__init__(split_value=split_value, contig_ids=contig_ids, feature_matrix=feature_matrix,
-                         clustering_method=clustering_method)
+                         clustering_method=clustering_method, log_dir=log_dir)
         self._input_layer_size = None
+        self.log_dir = f'{self.log_dir}/DEC_XIFENG'
 
     def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
                    pretrain_epochs=200, batch_size=128, tolerance_threshold=1e-3,
@@ -417,10 +440,14 @@ class DEC_Binner_Xifeng(DEC):
         print('...Pretraining...')
         self.autoencoder.compile(optimizer=optimizer, loss='mse')
 
+        log_dir = f'{self.log_dir}_pretrain_{int(time())}'
+
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
         # begin pretraining
         t0 = time()
         self.full_AE_train_history = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs,
-                                                          validation_data=[self.x_valid, self.x_valid])
+                                                          validation_data=[self.x_valid, self.x_valid], callbacks=[tensorboard_callback])
         print('Pretraining time: %ds' % round(time() - t0))
 
         # TODO Save weights of pretrained model
@@ -469,13 +496,13 @@ class DEC_Binner_Xifeng(DEC):
                                                                                       name='encoder')
 
 
-def create_binner(split_value, binner_type, clustering_method, contig_ids, feature_matrix):
+def create_binner(split_value, binner_type, clustering_method, contig_ids, feature_matrix, log_dir):
     clustering_method = get_clustering(clustering_method)
 
     binner_type = get_binner(binner_type)
 
     binner_instance = binner_type(split_value=split_value, contig_ids=contig_ids, clustering_method=clustering_method(),
-                                  feature_matrix=feature_matrix)
+                                  feature_matrix=feature_matrix, log_dir=log_dir)
     return binner_instance
 
 

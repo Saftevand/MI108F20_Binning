@@ -28,7 +28,7 @@ def main():
 
     binner_instance = binner.create_binner(split_value=0.8, clustering_method=args.clustering,
                                            binner_type=args.binnertype, feature_matrix=feature_matrix,
-                                           contig_ids=contig_ids)
+                                           contig_ids=contig_ids, log_dir=args.outdir)
 
     binner_instance.do_binning()
 
@@ -56,7 +56,7 @@ def handle_input_arguments():
     parser.add_argument("-sc", "--savepathcontigids", help="Path to save contigids")
 
     parser.add_argument("-c", "--clustering",nargs='?', default="KMeans", const="KMeans", help="Clustering algorithm to be used")
-    parser.add_argument("-bt", "--binnertype",nargs='?', default="DEC", const="DEC", help="Binner type to be used")
+    parser.add_argument("-bt", "--binnertype",nargs='?', default="DEC_XIFENG", const="DEC_XIFENG", help="Binner type to be used")
     parser.add_argument("-sd", "--savepathdepth", help="Path to save depths")
 
     parser.add_argument("-o", "--outdir", required=True,  help="Path to outdir of bins")
