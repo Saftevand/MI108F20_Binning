@@ -130,8 +130,15 @@ class clustering_k_means(clustering_method):
         return self.clustered_data
 
 
+def cudftonp(cudf):
+    np_ = np.zeros(len(cudf))
+    for i in range(0, len(cudf)):
+        np_[i] = cudf[i]
+    return np_
+
+
 class DBSCAN_GPU(clustering_method):
-    def __init__(self, eps=1.0, min_samples=1): #eps skal være en float værdi
+    def __init__(self, eps=1.0, min_samples=5): #eps skal være en float værdi
         super().__init__()
         self.eps = eps
         self.min_samples = min_samples
@@ -139,7 +146,8 @@ class DBSCAN_GPU(clustering_method):
     def do_clustering(self, dataset, max_iterations=5):
         dbscan = cuml.cluster.DBSCAN(eps=self.eps, min_samples=self.min_samples)
         dbscan.fit(dataset)
-        return dbscan.labels_
+        result = cudftonp(dbscan.labels_)
+        return result
 
     def get_loss(self):
         pass
@@ -150,10 +158,11 @@ class KMEANS_GPU(clustering_method):
         super().__init__()
         self.k = k_amount_of_clusters
 
-    def do_clustering(self, dataset, max_iterations=5): #Dataset skal være på cuDF format
-        kmeans = cuml.cluster.KMeans(n_clusters=self.k, max_iter=max_iterations, n_gpu=-1)
-        result = kmeans.fit(dataset)
-        return result.labels_
+    def do_clustering(self, dataset, max_iterations=5):
+        kmeans = cuml.cluster.KMeans(n_clusters=self.k, max_iter=max_iterations)
+        kmeans.fit(dataset)
+        result = cudftonp(kmeans.labels_)
+        return result
 
     def get_loss(self):
         pass

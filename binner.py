@@ -7,6 +7,7 @@ import numpy as np
 from clustering_layer_xifeng import ClusteringLayer
 from sklearn.cluster import KMeans
 from time import time
+import sys
 
 
 
@@ -16,8 +17,7 @@ class Binner(abc.ABC):
         self.bins = None
         self.contig_ids = contig_ids
         self.clustering_method = clustering_method
-        self.x_train, self.x_valid = data_processor.get_train_and_validation_data(feature_matrix=self.feature_matrix,
-                                                                             split_value=split_value)
+        self.x_train, self.x_valid = data_processor.get_train_and_validation_data(feature_matrix=self.feature_matrix, split_value=split_value)
         self.encoder = None
         self.full_AE_train_history = None
         self.log_dir = f'{log_dir}/logs'
@@ -27,7 +27,19 @@ class Binner(abc.ABC):
         pass
 
     def get_assignments(self):
-        return np.vstack([self.contig_ids, self.bins])
+        try:
+            result = np.vstack([self.contig_ids, self.bins])
+        except:
+            try:
+                print('Error: \nvstack failed! \nTrying hstack')
+                result = np.hstack([self.contig_ids, self.bins])
+                print(result[0])
+                print('Success')
+            except:
+                print('Error: \nhstack failed!')
+                print('Could not combine contig ids with bin assignment')
+                sys.exit('Program finished without results')
+        return result
 
 
 class Sequential_Binner(Binner):
@@ -41,7 +53,7 @@ class Sequential_Binner(Binner):
 
     def do_binning(self):
         self.full_AE_train_history, self.full_autoencoder = self.train()
-        return self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix), self.contig_ids)
+        return self.clustering_method.do_clustering(dataset=self.encoder.predict(self.feature_matrix))
 
     def _encoder(self):
         if self.encoder is not None:
@@ -70,7 +82,7 @@ class Sequential_Binner(Binner):
         self.decoder = stacked_decoder
         return stacked_decoder
 
-    def train(self, loss_funciton=keras.losses.mse, optimizer_=keras.optimizers.Adam(lr=0.03), number_of_epoch=50000):
+    def train(self, loss_funciton=keras.losses.mse, optimizer_=keras.optimizers.Adam(lr=0.03), number_of_epoch=1):
         stacked_ae = keras.models.Sequential([self._encoder(), self._decoder()])
         stacked_ae.compile(loss=loss_funciton,
                            optimizer=optimizer_,
