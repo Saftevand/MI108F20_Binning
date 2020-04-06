@@ -21,6 +21,7 @@ class Binner(abc.ABC):
         self.encoder = None
         self.full_AE_train_history = None
         self.log_dir = f'{log_dir}/logs'
+        self.train_start = None
 
     @abc.abstractmethod
     def do_binning(self) -> [[]]:
@@ -28,6 +29,9 @@ class Binner(abc.ABC):
 
     def get_assignments(self):
         return np.vstack([self.contig_ids, self.bins])
+
+    def set_train_timestamp(self):
+        self.train_start = int(time())
 
 
 class Sequential_Binner(Binner):
@@ -40,6 +44,7 @@ class Sequential_Binner(Binner):
         self.log_dir = f'{self.log_dir}/SAE'
 
     def do_binning(self):
+        self.set_train_timestamp()
         self.full_AE_train_history, self.full_autoencoder = self.train()
         return self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix), self.contig_ids)
 
@@ -127,7 +132,7 @@ class DEC(Binner):
         self.model.get_layer(name='clustering').set_weights([kmeans.cluster_centers_])
 
         # Tensorboard setup - run board manuel
-        log_dir = f'{self.log_dir}_cluster_training_{int(time())}'
+        log_dir = f'{self.log_dir}_cluster_training_{self.train_start}'
         tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, batch_size=batch_size)
         tensorboard_callback.set_model(self.model)
 
@@ -199,6 +204,7 @@ class Greedy_pretraining_DEC(DEC):
                    n_clusters=10, update_interval=140, pretrain_epochs=10, finetune_epochs=100, batch_size=128,
                    save_dir='results', tolerance_threshold=1e-3, max_iterations=200, true_bins=None,
                    neuron_list=[500, 500, 2000, 10], verbose=1, pretrain_loss='mean_squared_error'):
+        self.set_train_timestamp()
         self.n_clusters = n_clusters
 
         # layerwise and finetuned encoder
@@ -416,8 +422,10 @@ class DEC_Binner_Xifeng(DEC):
     def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
                    pretrain_epochs=10, batch_size=128, tolerance_threshold=1e-3,
                    max_iterations=100, true_bins=None):
+
+        self.set_train_timestamp()
         self.n_clusters = n_clusters
-        self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 500, 500, 2000, 10],
+        self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 200, 200, 400, 1],
                                                            act='relu', init=init)
 
         clustering_layer = ClusteringLayer(self.n_clusters, name='clustering')(self.encoder.output)
@@ -429,8 +437,8 @@ class DEC_Binner_Xifeng(DEC):
         self.model.summary()
         t0 = time()
         self.compile(optimizer=keras.optimizers.SGD(0.01, 0.9), loss='kld')
-        y_pred, loss_list = self.fit(x=self.feature_matrix, y=None, tolerance_threshold=tolerance_threshold, maxiter=max_iterations,
-                          batch_size=batch_size, update_interval=update_interval)
+        y_pred, loss_list = self.fit(x=self.feature_matrix, y=None, tolerance_threshold=tolerance_threshold,
+                                     maxiter=max_iterations, batch_size=batch_size, update_interval=update_interval)
 
         print('clustering time: ', (time() - t0))
         self.bins = y_pred
@@ -438,16 +446,17 @@ class DEC_Binner_Xifeng(DEC):
 
     def pretrain(self, x, optimizer='adam', epochs=200, batch_size=256):
         print('...Pretraining...')
-        self.autoencoder.compile(optimizer=optimizer, loss='mse')
+        self.autoencoder.compile(optimizer=optimizer, loss='mae')
 
-        log_dir = f'{self.log_dir}_pretrain_{int(time())}'
+        log_dir = f'{self.log_dir}_pretrain_{int(self.train_start)}'
 
         tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 
         # begin pretraining
         t0 = time()
         self.full_AE_train_history = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs,
-                                                          validation_data=[self.x_valid, self.x_valid], callbacks=[tensorboard_callback])
+                                                          validation_data=[self.x_valid, self.x_valid],
+                                                          callbacks=[tensorboard_callback])
         print('Pretraining time: %ds' % round(time() - t0))
 
         # TODO Save weights of pretrained model
