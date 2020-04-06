@@ -126,6 +126,7 @@ def get_train_and_validation_data(feature_matrix, split_value=0.8):
 
 def write_bins_to_file(bins):
     bins_string = "@@SEQUENCEID\tBINID\tLENGTH\n"
+    print(bins)
 
     for i in range(0, len(bins[0])):
         bins_string += f'{bins[0][i]}\t{bins[1][i]}\n'
