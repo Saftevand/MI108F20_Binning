@@ -86,6 +86,79 @@ class Sequential_Binner(Binner):
         return self.encoder.predict(feature_matrix)
 
 
+
+
+class Sequential_Binner1(Binner):
+
+    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix, log_dir):
+        super().__init__(contig_ids=contig_ids, clustering_method=clustering_method, feature_matrix=feature_matrix,
+                         split_value=split_value, log_dir=log_dir)
+        self._input_layer_size = None
+        self.decoder = None
+        self.decoder = None
+        self.autoencoder = None
+        self.history = None
+        self.log_dir = f'{self.log_dir}/Sequential_binner'
+        self.build_model()
+
+    def do_binning(self):
+        self.train()
+        return self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix), self.contig_ids)
+
+    def build_model(self):
+        number_of_neurons = 100
+        latent_factors = 30
+        input_shape = self.feature_matrix.shape[1]
+
+        #Encoder
+        encoder_input = keras.layers.Input(shape=(input_shape,), name="non_sequential")
+        encoding_layer1 = keras.layers.Dense(number_of_neurons, activation="relu")(input_nonsequential)
+        encoding_layer2 = keras.layers.Dense(number_of_neurons, activation="relu")(encoding_layer1)
+        encoder_output = keras.layers.Dense(latent_factors, activation="relu")(encoding_layer2)
+
+        encoder = keras.Model(encoder_input, encoder_output, name="encoder")
+        self.encoder
+        #Decoder
+        decoder_input = keras.Input(shape=(latent_factors,), name="encoded_input")
+        decoding_layer1 = keras.layers.Dense(number_of_neurons, activation="relu")(decoder_input)
+        decoding_layer2 = keras.layers.Dense(number_of_neurons, activation="relu")(decoding_layer1)
+        decoder_output = keras.layers.Dense(self.feature_matrix.shape[1])(decoding_layer2)
+
+        decoder = keras.Model(decoder_input, decoder_output , name="Decoder")
+
+        autoencoder_input = keras.Input(shape=(input_shape,), name="input")
+        encoded_input = encoder(autoencoder_input)
+        reconstructed_input = decoder(encoded_input)
+        autoencoder = keras.Model(autoencoder_input, reconstructed_input, name="autoencoder")
+
+        self.encoder = encoder
+        self.decoder = decoder
+        self.autoencdoer = autoencoder
+
+    def train(self):
+        self.autoencoder.compile(loss=keras.losses.mse, optimizer=keras.optimizers.Adam)
+
+        log_dir = f'{self.log_dir}_{int(time())}'
+
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
+        # begin pretraining
+
+        self.history = self.autoencoder.fit(self.feature_matrix, self.feature_matrix, batch_size=32, epochs=100,
+                                                          validation_split=0.2, shuffle=True,
+                                                          callbacks=[tensorboard_callback])
+
+    def encode(self, input):
+        return self.encoder(input)
+
+    def decode(self, input):
+        return self.decoder(input)
+
+
+
+
+
+
 class DEC(Binner):
     def __init__(self, split_value, contig_ids, feature_matrix, clustering_method, log_dir):
         super().__init__(split_value=split_value, contig_ids=contig_ids, feature_matrix=feature_matrix,
