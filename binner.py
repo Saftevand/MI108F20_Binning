@@ -30,15 +30,9 @@ class Binner(abc.ABC):
         try:
             result = np.vstack([self.contig_ids, self.bins])
         except:
-            try:
-                print('Error: \nvstack failed! \nTrying hstack')
-                result = np.hstack([self.contig_ids, self.bins])
-                print(result[0])
-                print('Success')
-            except:
-                print('Error: \nhstack failed!')
-                print('Could not combine contig ids with bin assignment')
-                sys.exit('Program finished without results')
+            print('Could not combine contig ids with bin assignment')
+            print('\nContig IDs:', self.contig_ids, '\nBins:', self.bins)
+            sys.exit('\nProgram finished without results')
         return result
 
 
@@ -53,7 +47,7 @@ class Sequential_Binner(Binner):
 
     def do_binning(self):
         self.full_AE_train_history, self.full_autoencoder = self.train()
-        return self.clustering_method.do_clustering(dataset=self.encoder.predict(self.feature_matrix))
+        self.bins = self.clustering_method.do_clustering(dataset=self.encoder.predict(self.feature_matrix))
 
     def _encoder(self):
         if self.encoder is not None:
@@ -91,7 +85,7 @@ class Sequential_Binner(Binner):
         print('Training start')
         history = stacked_ae.fit(x=self.x_train, y=self.x_train, epochs=number_of_epoch,
                                  validation_data=[self.x_valid, self.x_valid])
-        print('Training ended')
+        print('Training end')
         return history, stacked_ae
 
     def extract_features(self, feature_matrix):
