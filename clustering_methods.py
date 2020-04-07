@@ -5,6 +5,7 @@ import pandas as pd
 import abc
 import cuml
 import cudf
+import sklearn
 
 
 class clustering_method:
@@ -12,7 +13,7 @@ class clustering_method:
         pass
 
     @abc.abstractmethod
-    def do_clustering(self, dataset, max_iterations=5):
+    def do_clustering(self, dataset):
         pass
 
     @abc.abstractmethod
@@ -22,18 +23,18 @@ class clustering_method:
 
 
 class clustering_element():
-    def __init__(self, cluster, element, name):
+    def __init__(self, cluster, element):
         self.cluster = cluster
         self.element = element
-        self.name = name
 
 
 class random_cluster(clustering_method):
     def __init__(self, k_clusters=10):
+        super().__init__()
         self.k = k_clusters
         self.clustered_data = None
 
-    def do_clustering(self, dataset, contignames):
+    def do_clustering(self, dataset):
         clusters = [[] for i in range(self.k)]
         for contig in dataset:
             assignment = randint(0, self.k-1)
@@ -45,8 +46,25 @@ class random_cluster(clustering_method):
 
 
 class clustering_k_means(clustering_method):
-    def __init__(self, k_clusters=10):
+    def __init__(self, k_clusters=10, max_iterations=10):
+        super().__init__()
         self.k = k_clusters
+        self.max_ite = max_iterations
+
+    def do_clustering(self, dataset):
+        kmeans = sklearn.cluster.MiniBatchKMeans(n_clusters=self.k, max_iter=self.max_ite)
+        kmeans.fit(dataset)
+        return kmeans.labels_
+
+    def get_loss(self):
+        return None
+
+'''
+class clustering_k_means(clustering_method):
+    def __init__(self, k_clusters=10, max_iterations=5):
+        super().__init__()
+        self.k = k_clusters
+        self.max_iterations = max_iterations
         self.centroids = []
         self.clustered_data = None
 
@@ -98,18 +116,18 @@ class clustering_k_means(clustering_method):
 
             self.centroids[i] = new_centroid
 
-    def prep_data(self, dataset, contig_names):
+    def prep_data(self, dataset):
         result = []
         for i in range(0, len(dataset)):
-            result.append(clustering_element(element=dataset[i], cluster=-1, name=contig_names[i]))
+            result.append(clustering_element(element=dataset[i], cluster=-1))
         return result
 
-    def do_clustering(self, dataset, contig_names, max_iterations=10):
-        prep_dataset = self.prep_data(dataset, contig_names)
+    def do_clustering(self, dataset):
+        prep_dataset = self.prep_data(dataset)
         self.forgy_init(dataset=dataset)
         self.assignment_step(dataset=prep_dataset)
 
-        for i in range(max_iterations):
+        for i in range(self.max_iterations):
             self.update_step(dataset=prep_dataset)
             self.assignment_step(dataset=prep_dataset)
 
@@ -120,7 +138,6 @@ class clustering_k_means(clustering_method):
             points_in_cluster = filter(lambda x: x.cluster == i, prep_dataset)
             for j in points_in_cluster:
                 current_cluster[j.name] = j.cluster
-                #current_cluster.append(j.element)
             clusters.append(current_cluster)
 
         result = pd.DataFrame(clusters)
@@ -128,10 +145,10 @@ class clustering_k_means(clustering_method):
 
         self.clustered_data = result
         return self.clustered_data
-
+'''
 
 class DBSCAN_GPU(clustering_method):
-    def __init__(self, eps=1.0, min_samples=1): #eps skal være en float værdi
+    def __init__(self, eps=1.0, min_samples=5): #eps skal være en float værdi
         super().__init__()
         self.eps = eps
         self.min_samples = min_samples
@@ -139,22 +156,23 @@ class DBSCAN_GPU(clustering_method):
     def do_clustering(self, dataset, max_iterations=5):
         dbscan = cuml.cluster.DBSCAN(eps=self.eps, min_samples=self.min_samples)
         dbscan.fit(dataset)
-        return dbscan.labels_
+        return dbscan.labels_.to_array()
 
     def get_loss(self):
-        pass
+        return None
 
 
 class KMEANS_GPU(clustering_method):
-    def __init__(self, k_amount_of_clusters=5):
+    def __init__(self, k_amount_of_clusters=5, max_iterations=5):
         super().__init__()
         self.k = k_amount_of_clusters
+        self.max_iterations = max_iterations
 
-    def do_clustering(self, dataset, max_iterations=5): #Dataset skal være på cuDF format
-        kmeans = cuml.cluster.KMeans(n_clusters=self.k, max_iter=max_iterations, n_gpu=-1)
-        result = kmeans.fit(dataset)
-        return result.labels_
+    def do_clustering(self, dataset):
+        kmeans = cuml.cluster.KMeans(n_clusters=self.k, max_iter=self.max_iterations)
+        kmeans.fit(dataset)
+        return kmeans.labels_.to_array()
 
     def get_loss(self):
-        pass
+        return None
 
