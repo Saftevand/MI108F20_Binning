@@ -176,3 +176,12 @@ class KMEANS_GPU(clustering_method):
     def get_loss(self):
         return None
 
+
+def get_threshold(contigs, number_og_seeds=100, number_of_distance_intervals=400):
+    seeds = contigs[np.random.choice(len(contigs), size=number_og_seeds, replace=False)]
+    distances = np.empty(shape=(number_og_seeds, contigs.shape[1]))
+
+    for seed_idx, seed in enumerate(seeds):
+        for contig in enumerate(contigs):
+           distances[][] np.corrcoef
+

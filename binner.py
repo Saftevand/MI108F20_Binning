@@ -109,28 +109,40 @@ class Sequential_Binner1(Binner):
 
     def do_binning(self):
         self.train()
-        return self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix), self.contig_ids)
+        self.bins = self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix))
+        return self.bins
 
     def build_model(self):
-        number_of_neurons = 100
-        latent_factors = 30
+        number_of_neurons = 256
+        latent_factors = 32
         input_shape = self.feature_matrix.shape[1]
 
         #Encoder
         encoder_input = keras.layers.Input(shape=(input_shape,), name="non_sequential")
-        encoding_layer1 = keras.layers.Dense(number_of_neurons, activation="relu")(input_nonsequential)
-        encoding_layer2 = keras.layers.Dense(number_of_neurons, activation="relu")(encoding_layer1)
-        encoder_output = keras.layers.Dense(latent_factors, activation="relu")(encoding_layer2)
+
+        encoding_layer1 = keras.layers.Dense(number_of_neurons, activation="relu")(encoder_input)
+        bn2 = keras.layers.BatchNormalization()(encoding_layer1)
+
+        encoding_layer2 = keras.layers.Dense(number_of_neurons, activation="relu")(bn2)
+        bn3 = keras.layers.BatchNormalization()(encoding_layer2)
+
+        encoder_output = keras.layers.Dense(latent_factors, activation="relu")(bn3)
 
         encoder = keras.Model(encoder_input, encoder_output, name="encoder")
-        self.encoder
-        #Decoder
-        decoder_input = keras.Input(shape=(latent_factors,), name="encoded_input")
-        decoding_layer1 = keras.layers.Dense(number_of_neurons, activation="relu")(decoder_input)
-        decoding_layer2 = keras.layers.Dense(number_of_neurons, activation="relu")(decoding_layer1)
-        decoder_output = keras.layers.Dense(self.feature_matrix.shape[1])(decoding_layer2)
 
-        decoder = keras.Model(decoder_input, decoder_output , name="Decoder")
+        #Decoder
+        latent_representation = keras.Input(shape=(latent_factors,), name="latent_representation")
+
+        decoding_layer1 = keras.layers.Dense(number_of_neurons, activation="relu")(latent_representation)
+        bn4 = keras.layers.BatchNormalization()(decoding_layer1)
+
+        decoding_layer2 = keras.layers.Dense(number_of_neurons, activation="relu")(bn4)
+        bn5 = keras.layers.BatchNormalization()(decoding_layer2)
+        dropout = keras.layers.Dropout(rate=0.2)(bn5)
+
+        decoder_output = keras.layers.Dense(self.feature_matrix.shape[1])(dropout)
+
+        decoder = keras.Model(latent_representation, decoder_output , name="Decoder")
 
         autoencoder_input = keras.Input(shape=(input_shape,), name="input")
         encoded_input = encoder(autoencoder_input)
@@ -139,10 +151,10 @@ class Sequential_Binner1(Binner):
 
         self.encoder = encoder
         self.decoder = decoder
-        self.autoencdoer = autoencoder
+        self.autoencoder = autoencoder
 
     def train(self):
-        self.autoencoder.compile(loss=keras.losses.mse, optimizer=keras.optimizers.Adam)
+        self.autoencoder.compile(optimizer=keras.optimizers.Adam(), loss='mse')
 
         log_dir = f'{self.log_dir}_{int(time())}'
 
@@ -153,14 +165,13 @@ class Sequential_Binner1(Binner):
         self.history = self.autoencoder.fit(self.feature_matrix, self.feature_matrix, batch_size=32, epochs=100,
                                                           validation_split=0.2, shuffle=True,
                                                           callbacks=[tensorboard_callback])
+        np.save('latent_representation', self.encode(self.feature_matrix))
 
     def encode(self, input):
         return self.encoder(input)
 
     def decode(self, input):
         return self.decoder(input)
-
-
 
 
 
@@ -492,11 +503,11 @@ class DEC_Binner_Xifeng(DEC):
         self._input_layer_size = None
         self.log_dir = f'{self.log_dir}/DEC_XIFENG'
 
-    def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
+    def do_binning(self, init='glorot_uniform', pretrain_optimizer=keras.optimizers.Adam(learning_rate=0.0001), n_clusters=10, update_interval=140,
                    pretrain_epochs=10, batch_size=128, tolerance_threshold=1e-3,
                    max_iterations=100, true_bins=None):
         self.n_clusters = n_clusters
-        self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 500, 500, 2000, 10],
+        self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 100, 100, 50, 10],
                                                            act='relu', init=init)
 
         clustering_layer = ClusteringLayer(self.n_clusters, name='clustering')(self.encoder.output)
@@ -514,7 +525,8 @@ class DEC_Binner_Xifeng(DEC):
         print('clustering time: ', (time() - t0))
         self.bins = y_pred
         self.cluster_loss_list = loss_list
-
+        latent_representation = self.encoder.predict(self.feature_matrix)
+        np.save('latent_representation',latent_representation)
     def pretrain(self, x, optimizer='adam', epochs=200, batch_size=256):
         print('...Pretraining...')
         self.autoencoder.compile(optimizer=optimizer, loss='mse')
@@ -595,7 +607,7 @@ def get_clustering(cluster):
 
 binner_dict = {
     'DEC': Greedy_pretraining_DEC,
-    'SAE': Sequential_Binner,
+    'SEQ': Sequential_Binner1,
     'DEC_XIFENG': DEC_Binner_Xifeng
 }
 
