@@ -24,17 +24,28 @@ def main():
     print(args)
     #   TODO    calc methyl
 
+    #binid_to_int = data_processor.get_unique_ids_truth('/mnt/cami_high/gsa_mapping_pool.binning')
+
+    #print(len(binid_to_int.keys()))
+
+
     feature_matrix, contig_ids = data_processor.get_featurematrix(args)
 
     binner_instance = binner.create_binner(split_value=0.8, clustering_method=args.clustering,
                                            binner_type=args.binnertype, feature_matrix=feature_matrix,
                                            contig_ids=contig_ids, log_dir=args.outdir)
 
-    binner_instance.do_binning(pretrain_epochs=100, max_iterations=100, n_clusters=60)
+    adam = keras.optimizers.Adam(learning_rate=0.0001)
+
+    binner_instance.do_binning(pretrain_epochs=300, n_clusters=1074, init='glorot_uniform', max_iterations=600, pretrain_optimizer=adam)
 
     results = binner_instance.get_assignments()
 
     data_processor.write_bins_to_file(results)
+
+    print(feature_matrix.mean())
+    print(f'{feature_matrix.max()} : max')
+    print(f'{feature_matrix.min()} : min')
 
 
 def handle_input_arguments():

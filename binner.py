@@ -45,6 +45,36 @@ class Binner(abc.ABC):
     def set_train_timestamp(self):
         self.train_start = int(time())
 
+    def custom_vamb_loss(self, alpha):
+        '''returns the loss function for the model'''
+
+        def return_function(true, pred):
+
+            print(true)
+            print(pred)
+
+            tnfs_pred = pred[:136]
+            tnfs_true = true[:136]
+
+            abundance_pred = keras.backend.log(pred[136:])
+            abundance_true = true[136:]
+            _, num_samples = abundance_pred.shape
+
+            print(num_samples)
+
+            tnfs_loss = 0
+            for i in range(136):
+                tnfs_loss += (tnfs_pred[i]-tnfs_true[i])**2
+
+            abundance_loss = 0
+            for i in range(num_samples):
+                abundance_loss += abundance_pred[i] * abundance_true[i]
+
+            '''              W_ab                    *      E_ab      +     W_tnf    *  E_tnf'''
+            return ((1-alpha) * np.log(num_samples)) * abundance_loss + ((alpha/136) * tnfs_loss)
+        return return_function
+
+
 
 class Sequential_Binner(Binner):
     def __init__(self, split_value, contig_ids, clustering_method, feature_matrix, log_dir):
@@ -58,7 +88,7 @@ class Sequential_Binner(Binner):
     def do_binning(self):
         self.set_train_timestamp()
         self.full_AE_train_history, self.full_autoencoder = self.train()
-        return self.clustering_method.do_clustering(dataset=self.encoder.predict(self.feature_matrix))
+        return self.clustering_method.do_clustering(dataset=self.encoder.predict(self.feature_matrix), contig_names=self.contig_ids)
 
     def _encoder(self):
         if self.encoder is not None:
@@ -66,11 +96,11 @@ class Sequential_Binner(Binner):
         self._input_layer_size = len(self.x_train[1])
 
         stacked_encoder = keras.models.Sequential([
-            keras.layers.Dense(500, activation="selu", input_shape=[self._input_layer_size, ],
+            keras.layers.Dense(100, activation="selu", input_shape=[self._input_layer_size, ],
                                kernel_initializer=keras.initializers.lecun_normal()),
-            keras.layers.Dense(500, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
-            keras.layers.Dense(2000, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
-            keras.layers.Dense(10, kernel_initializer=keras.initializers.lecun_normal()), ])
+            keras.layers.Dense(100, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
+            keras.layers.Dense(300, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
+            keras.layers.Dense(5, kernel_initializer=keras.initializers.lecun_normal()), ])
         self.encoder = stacked_encoder
         return stacked_encoder
 
@@ -79,23 +109,26 @@ class Sequential_Binner(Binner):
             return self.decoder
 
         stacked_decoder = keras.models.Sequential([
-            keras.layers.Dense(2000, activation="selu", input_shape=[10],
+            keras.layers.Dense(300, activation="selu", input_shape=[5],
                                kernel_initializer=keras.initializers.lecun_normal()),
-            keras.layers.Dense(500, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
-            keras.layers.Dense(500, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
+            keras.layers.Dense(100, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
+            keras.layers.Dense(100, activation="selu", kernel_initializer=keras.initializers.lecun_normal()),
             keras.layers.Dense(self._input_layer_size, kernel_initializer=keras.initializers.lecun_normal()), ])
         self.decoder = stacked_decoder
         return stacked_decoder
 
-    def train(self, loss_funciton=keras.losses.mse, optimizer_=keras.optimizers.Adam(lr=0.03), number_of_epoch=1):
+    def train(self, loss_funciton=keras.losses.mse, optimizer_=keras.optimizers.Adam(lr=0.01), number_of_epoch=100):
+        log_dir = f'{self.log_dir}_train_{int(self.train_start)}'
+
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
         stacked_ae = keras.models.Sequential([self._encoder(), self._decoder()])
         stacked_ae.compile(loss=loss_funciton,
-                           optimizer=optimizer_,
-                           metrics=['accuracy'])
+                           optimizer=optimizer_)
 
         print('Training start')
         history = stacked_ae.fit(x=self.x_train, y=self.x_train, epochs=number_of_epoch,
-                                 validation_data=[self.x_valid, self.x_valid])
+                                 validation_data=[self.x_valid, self.x_valid], callbacks=[tensorboard_callback])
         print('Training ended')
         return history, stacked_ae
 
@@ -158,6 +191,7 @@ class DEC(Binner):
         index = 0
         index_array = np.arange(x.shape[0])
         for ite in range(int(maxiter)):
+            print(ite)
             if ite % update_interval == 0:
                 q = self.model.predict(x, verbose=0)
                 p = self.target_distribution(q)  # update the auxiliary target distribution p
@@ -432,12 +466,11 @@ class DEC_Binner_Xifeng(DEC):
         self.log_dir = f'{self.log_dir}/DEC_XIFENG'
 
     def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
-                   pretrain_epochs=10, batch_size=128, tolerance_threshold=1e-3,
-                   max_iterations=100, true_bins=None):
+                   pretrain_epochs=20, batch_size=128, tolerance_threshold=1e-3, max_iterations=100, true_bins=None):
 
         self.set_train_timestamp()
         self.n_clusters = n_clusters
-        self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 200, 200, 400, 1],
+        self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 100, 100, 50, 10],
                                                            act='relu', init=init)
 
         clustering_layer = ClusteringLayer(self.n_clusters, name='clustering')(self.encoder.output)
@@ -458,7 +491,8 @@ class DEC_Binner_Xifeng(DEC):
 
     def pretrain(self, x, optimizer='adam', epochs=200, batch_size=256):
         print('...Pretraining...')
-        self.autoencoder.compile(optimizer=optimizer, loss='mae')
+
+        self.autoencoder.compile(optimizer=optimizer, loss=self.custom_vamb_loss(0.05))
 
         log_dir = f'{self.log_dir}_pretrain_{int(self.train_start)}'
 
