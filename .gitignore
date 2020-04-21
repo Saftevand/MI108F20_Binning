@@ -151,3 +151,11 @@ cami_low_truths.npy
 binning_results.tsv
 
 cuml_temp.py
+
+vamb_snippet.py
+
+numpy_test.py
+
+latent_representation.npy
+
+contig_ids_high.npy

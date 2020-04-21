@@ -66,8 +66,8 @@ def handle_input_arguments():
     parser.add_argument("-st", "--savepathtnfs", help="Path to save tnfs")
     parser.add_argument("-sc", "--savepathcontigids", help="Path to save contigids")
 
-    parser.add_argument("-c", "--clustering",nargs='?', default="KMeans", const="KMeans", help="Clustering algorithm to be used")
-    parser.add_argument("-bt", "--binnertype",nargs='?', default="DEC_XIFENG", const="DEC_XIFENG", help="Binner type to be used")
+    parser.add_argument("-c", "--clustering",nargs='?', default="KMeans_gpu", const="KMeans_gpu", help="Clustering algorithm to be used")
+    parser.add_argument("-bt", "--binnertype",nargs='?', default="SEQ", const="SEQ", help="Binner type to be used")
     parser.add_argument("-sd", "--savepathdepth", help="Path to save depths")
 
     parser.add_argument("-o", "--outdir", required=True,  help="Path to outdir of bins")

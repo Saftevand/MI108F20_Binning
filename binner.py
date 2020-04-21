@@ -31,15 +31,9 @@ class Binner(abc.ABC):
         try:
             result = np.vstack([self.contig_ids, self.bins])
         except:
-            try:
-                print('Error: \nvstack failed! \nTrying hstack')
-                result = np.hstack([self.contig_ids, self.bins])
-                print(result[0])
-                print('Success')
-            except:
-                print('Error: \nhstack failed!')
-                print('Could not combine contig ids with bin assignment')
-                sys.exit('Program finished without results')
+            print('Could not combine contig ids with bin assignment')
+            print('\nContig IDs:', self.contig_ids, '\nBins:', self.bins)
+            sys.exit('\nProgram finished without results')
         return result
 
     def set_train_timestamp(self):
@@ -88,7 +82,7 @@ class Sequential_Binner(Binner):
     def do_binning(self):
         self.set_train_timestamp()
         self.full_AE_train_history, self.full_autoencoder = self.train()
-        return self.clustering_method.do_clustering(dataset=self.encoder.predict(self.feature_matrix), contig_names=self.contig_ids)
+        self.bins = self.clustering_method.do_clustering(dataset=self.encoder.predict(self.feature_matrix))
 
     def _encoder(self):
         if self.encoder is not None:
@@ -134,6 +128,90 @@ class Sequential_Binner(Binner):
 
     def extract_features(self, feature_matrix):
         return self.encoder.predict(feature_matrix)
+
+
+
+
+class Sequential_Binner1(Binner):
+
+    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix, log_dir):
+        super().__init__(contig_ids=contig_ids, clustering_method=clustering_method, feature_matrix=feature_matrix,
+                         split_value=split_value, log_dir=log_dir)
+        self._input_layer_size = None
+        self.decoder = None
+        self.decoder = None
+        self.autoencoder = None
+        self.history = None
+        self.log_dir = f'{self.log_dir}/Sequential_binner'
+        self.build_model()
+
+    def do_binning(self):
+        self.train()
+        self.bins = self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix))
+        return self.bins
+
+    def build_model(self):
+        number_of_neurons = 256
+        latent_factors = 32
+        input_shape = self.feature_matrix.shape[1]
+
+        #Encoder
+        encoder_input = keras.layers.Input(shape=(input_shape,), name="non_sequential")
+
+        encoding_layer1 = keras.layers.Dense(number_of_neurons, activation="relu")(encoder_input)
+        bn2 = keras.layers.BatchNormalization()(encoding_layer1)
+
+        encoding_layer2 = keras.layers.Dense(number_of_neurons, activation="relu")(bn2)
+        bn3 = keras.layers.BatchNormalization()(encoding_layer2)
+
+        encoder_output = keras.layers.Dense(latent_factors, activation="relu")(bn3)
+
+        encoder = keras.Model(encoder_input, encoder_output, name="encoder")
+
+        #Decoder
+        latent_representation = keras.Input(shape=(latent_factors,), name="latent_representation")
+
+        decoding_layer1 = keras.layers.Dense(number_of_neurons, activation="relu")(latent_representation)
+        bn4 = keras.layers.BatchNormalization()(decoding_layer1)
+
+        decoding_layer2 = keras.layers.Dense(number_of_neurons, activation="relu")(bn4)
+        bn5 = keras.layers.BatchNormalization()(decoding_layer2)
+        dropout = keras.layers.Dropout(rate=0.2)(bn5)
+
+        decoder_output = keras.layers.Dense(self.feature_matrix.shape[1])(dropout)
+
+        decoder = keras.Model(latent_representation, decoder_output , name="Decoder")
+
+        autoencoder_input = keras.Input(shape=(input_shape,), name="input")
+        encoded_input = encoder(autoencoder_input)
+        reconstructed_input = decoder(encoded_input)
+        autoencoder = keras.Model(autoencoder_input, reconstructed_input, name="autoencoder")
+
+        self.encoder = encoder
+        self.decoder = decoder
+        self.autoencoder = autoencoder
+
+    def train(self):
+        self.autoencoder.compile(optimizer=keras.optimizers.Adam(), loss='mse')
+
+        log_dir = f'{self.log_dir}_{int(time())}'
+
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
+        # begin pretraining
+
+        self.history = self.autoencoder.fit(self.feature_matrix, self.feature_matrix, batch_size=32, epochs=100,
+                                                          validation_split=0.2, shuffle=True,
+                                                          callbacks=[tensorboard_callback])
+        np.save('latent_representation', self.encode(self.feature_matrix))
+
+    def encode(self, input):
+        return self.encoder(input)
+
+    def decode(self, input):
+        return self.decoder(input)
+
+
 
 
 class DEC(Binner):
@@ -465,10 +543,9 @@ class DEC_Binner_Xifeng(DEC):
         self._input_layer_size = None
         self.log_dir = f'{self.log_dir}/DEC_XIFENG'
 
-    def do_binning(self, init='glorot_uniform', pretrain_optimizer='adam', n_clusters=10, update_interval=140,
-                   pretrain_epochs=20, batch_size=128, tolerance_threshold=1e-3, max_iterations=100, true_bins=None):
-
-        self.set_train_timestamp()
+    def do_binning(self, init='glorot_uniform', pretrain_optimizer=keras.optimizers.Adam(learning_rate=0.0001), n_clusters=10, update_interval=140,
+                   pretrain_epochs=10, batch_size=128, tolerance_threshold=1e-3,
+                   max_iterations=100, true_bins=None):
         self.n_clusters = n_clusters
         self.autoencoder, self.encoder = self.define_model(dims=[self.x_train.shape[-1], 100, 100, 50, 10],
                                                            act='relu', init=init)
@@ -488,7 +565,8 @@ class DEC_Binner_Xifeng(DEC):
         print('clustering time: ', (time() - t0))
         self.bins = y_pred
         self.cluster_loss_list = loss_list
-
+        latent_representation = self.encoder.predict(self.feature_matrix)
+        np.save('latent_representation',latent_representation)
     def pretrain(self, x, optimizer='adam', epochs=200, batch_size=256):
         print('...Pretraining...')
 
@@ -571,7 +649,7 @@ def get_clustering(cluster):
 
 binner_dict = {
     'DEC': Greedy_pretraining_DEC,
-    'SAE': Sequential_Binner,
+    'SEQ': Sequential_Binner1,
     'DEC_XIFENG': DEC_Binner_Xifeng
 }
 
