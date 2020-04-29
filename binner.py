@@ -8,6 +8,8 @@ from clustering_layer_xifeng import ClusteringLayer
 from sklearn.cluster import KMeans
 from time import time
 import sys
+import vamb_clust
+
 
 
 
@@ -130,6 +132,188 @@ class Sequential_Binner(Binner):
         return self.encoder.predict(feature_matrix)
 
 
+class Badass_Binner(Binner):
+
+    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix, log_dir):
+        super().__init__(contig_ids=contig_ids, clustering_method=clustering_method, feature_matrix=feature_matrix,
+                         split_value=split_value, log_dir=log_dir)
+        self._input_layer_size = None
+        self.decoder = None
+        self.decoder = None
+        self.autoencoder = None
+        self.history = None
+        self.log_dir = f'{self.log_dir}/Sequential_binner'
+        self.encoding_size = 0
+
+    def do_binning(self, layers):
+        self.build_model(layers)
+
+        self.fit(self.x_train)
+        self.bins = self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix))
+        return self.bins
+
+    def build_model(self, layers):
+
+
+        self.encoding_size = 50
+
+        init = "glorot_uniform"
+        activation = "elu"
+
+        input_shape = self.feature_matrix.shape[1]
+
+        #Encoder
+        encoder_input = keras.layers.Input(shape=(input_shape,), name="non_sequential")
+
+        # This layer? should we have it?
+        enc = keras.layers.Activation("elu")(encoder_input)
+
+
+        layer_no = 1
+        for layer in layers[:-1]:
+            enc = keras.layers.Dense(layer, activation=activation, kernel_initializer=init, name=f'Encoder_Layer_{layer_no}')(enc)
+            layer_no += 1
+
+        encoder_output = keras.layers.Dense(layers[-1], kernel_initializer=init, name='latent_layer')(enc)
+
+        encoder = keras.Model(encoder_input, encoder_output, name="encoder")
+
+        # first layer of decoder outside loop - we need to get hold of encoder_output to define encoder and extra output
+        layers.reverse()
+        layers.pop(0)
+        print(layers)
+        layer_no = 1
+        dec = keras.layers.Dense(layers[0], activation=activation, kernel_initializer=init, name=f'Decoder_layer_{layer_no}')(encoder_output)
+        layers.pop(0)
+        print(layers)
+        layer_no += 1
+
+        for layer in layers:
+                dec = keras.layers.Dense(layer, activation=activation, kernel_initializer=init, name=f'Decoder_layer_{layer_no}')(dec)
+        decoder_output = keras.layers.Dense(input_shape, activation="sigmoid", kernel_initializer=init)(dec)
+
+        #dec1 = keras.layers.Dense(100, activation=activation, kernel_initializer=init)(encoder_output)
+        #dec2 = keras.layers.Dense(100, activation=activation, kernel_initializer=init)(dec1)
+
+        #decoder_output = keras.layers.Dense(input_shape, activation="sigmoid", kernel_initializer=init)(dec)
+
+
+        autoencoder = keras.Model(inputs=[encoder_input], outputs=[decoder_output, encoder_output], name="autoencoder")
+
+        self.encoder = encoder
+        self.autoencoder = autoencoder
+
+        opt = keras.optimizers.Adam(learning_rate=0.001)
+
+
+        # We can put loss_weights=[0.9, 0.1] into the compile method to add weights to losses - regularization
+        self.autoencoder.compile(optimizer=opt, loss=['mse', 'mse'], experimental_run_tf_function=False)
+
+        print(self.autoencoder.summary())
+        print(self.encoder.summary())
+
+
+    def train(self, batch_size=400, epochs=100, validation_split=0.2, shuffle=True):
+
+        log_dir = f'{self.log_dir}_{int(time())}'
+
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
+        # We dont have target labels for latent encodings. They are calculated in loss func. Dummy is given instead
+        dummy_matrix = np.arrange(len(self.feature_matrix))
+
+        # begin pretraining
+        self.history = self.autoencoder.fit(self.feature_matrix, [self.feature_matrix, dummy_matrix], batch_size=batch_size,
+                                            epochs=epochs, validation_split=validation_split, shuffle=shuffle,
+                                            callbacks=[tensorboard_callback])
+        np.save('latent_representation', self.encode(self.feature_matrix))
+
+    def encode(self, inp):
+        return self.encoder(inp)
+
+    def decode(self, input):
+        return self.decoder(input)
+
+    def fit(self, x, y=None, batch_size=400, epochs=6):
+
+        data = np.copy(x)
+
+        no_batches = len(x)/batch_size
+
+        # 1. get appropriate batch
+
+
+        '''Next 15 lines regarding tensorboard and callbacks are from Stack overflow user: "erenon"
+           https://stackoverflow.com/questions/44861149/keras-use-tensorboard-with-train-on-batch'''
+        # create tf callback
+        tensorboard = keras.callbacks.TensorBoard(
+            log_dir='results/my_tf_logs',
+            histogram_freq=0,
+            batch_size=batch_size,
+            write_graph=True,
+            write_grads=True
+        )
+        tensorboard.set_model(self.autoencoder)
+
+        # Transform train_on_batch return value
+        # to dict expected by on_batch_end callback
+        def named_logs(model, logs):
+            result = {}
+            for l in zip(model.metrics_names, logs):
+                result[l[0]] = l[1]
+            return result
+
+        for i in range(epochs):
+
+            indices = np.arange(len(data))
+            np.random.RandomState(i).shuffle(data)
+            np.random.RandomState(i).shuffle(indices)
+            batches = np.array_split(data, no_batches)
+            batch_indices_list = np.array_split(indices, no_batches)
+            amount_batches = len(batches)
+
+            print(f'Current epoch: {i+1} of total epochs: {epochs}')
+            total_loss = 0
+            reconstruct_loss = 0
+            cluster_loss = 0
+            for batch_no, batch in enumerate(batches):
+                batch_indices = batch_indices_list[batch_no]
+                print(f'Current batch: {batch_no+1} of total batches: {amount_batches}')
+
+                # 2. encode all data
+                encoded_data_full = self.encode(data).numpy()
+
+                # 3. cluster
+                assigned_medoids_per_contig = np.zeros(encoded_data_full.shape)
+
+                # Kan gøres bedre, assigne mens, clusters bliver lavet
+
+                cluster_generator = vamb_clust.cluster(encoded_data_full)
+
+                clusters = ((encoded_data_full[c.medoid], c.members) for (i, c) in enumerate(cluster_generator))
+
+                for medoid, members in clusters:
+                    for member in members:
+                        assigned_medoids_per_contig[member] = medoid
+
+                truth_medoids = tf.gather(params=assigned_medoids_per_contig, indices=batch_indices)
+
+                list_of_losses = self.autoencoder.train_on_batch(x=[batch], y=[batch, truth_medoids])
+                # print(self.autoencoder.metrics_names)
+                # print(list_of_losses)
+
+                total_loss += list_of_losses[0]
+                reconstruct_loss += list_of_losses[1]
+                cluster_loss += list_of_losses[2]
+
+            history_obj = list()
+            history_obj.append(total_loss / amount_batches)
+            history_obj.append(reconstruct_loss / amount_batches)
+            history_obj.append(cluster_loss / amount_batches)
+
+            tensorboard.on_epoch_end(i+1, named_logs(self.autoencoder, history_obj))
+
+        tensorboard.on_train_end(None)
 
 
 class Sequential_Binner1(Binner):
@@ -151,48 +335,43 @@ class Sequential_Binner1(Binner):
         return self.bins
 
     def build_model(self):
-        number_of_neurons = 256
+        n1 = 100
+        n2 = 100
+        n3 = 50
+        n4 = 10
+
+        init = "glorot_uniform"
+        activation = "elu"
+
         latent_factors = 32
         input_shape = self.feature_matrix.shape[1]
 
         #Encoder
         encoder_input = keras.layers.Input(shape=(input_shape,), name="non_sequential")
+        elu_activate = keras.layers.Activation("elu")(encoder_input)
 
-        encoding_layer1 = keras.layers.Dense(number_of_neurons, activation="relu")(encoder_input)
-        bn2 = keras.layers.BatchNormalization()(encoding_layer1)
+        enc2 = keras.layers.Dense(100, activation=activation, kernel_initializer=init)(elu_activate)
+        enc3 = keras.layers.Dense(100, activation=activation, kernel_initializer=init)(enc2)
 
-        encoding_layer2 = keras.layers.Dense(number_of_neurons, activation="relu")(bn2)
-        bn3 = keras.layers.BatchNormalization()(encoding_layer2)
+        encoder_output = keras.layers.Dense(50, kernel_initializer=init)(enc3)
 
-        encoder_output = keras.layers.Dense(latent_factors, activation="relu")(bn3)
+        dec1 = keras.layers.Dense(100, activation=activation, kernel_initializer=init)(encoder_output)
+        dec2 = keras.layers.Dense(100, activation=activation, kernel_initializer=init)(dec1)
+
+        decoder_output = keras.layers.Dense(input_shape, activation="sigmoid", kernel_initializer=init)(dec2)
 
         encoder = keras.Model(encoder_input, encoder_output, name="encoder")
-
-        #Decoder
-        latent_representation = keras.Input(shape=(latent_factors,), name="latent_representation")
-
-        decoding_layer1 = keras.layers.Dense(number_of_neurons, activation="relu")(latent_representation)
-        bn4 = keras.layers.BatchNormalization()(decoding_layer1)
-
-        decoding_layer2 = keras.layers.Dense(number_of_neurons, activation="relu")(bn4)
-        bn5 = keras.layers.BatchNormalization()(decoding_layer2)
-        dropout = keras.layers.Dropout(rate=0.2)(bn5)
-
-        decoder_output = keras.layers.Dense(self.feature_matrix.shape[1])(dropout)
-
-        decoder = keras.Model(latent_representation, decoder_output , name="Decoder")
-
-        autoencoder_input = keras.Input(shape=(input_shape,), name="input")
-        encoded_input = encoder(autoencoder_input)
-        reconstructed_input = decoder(encoded_input)
-        autoencoder = keras.Model(autoencoder_input, reconstructed_input, name="autoencoder")
+        autoencoder = keras.Model(encoder_input, decoder_output, name="autoencoder")
 
         self.encoder = encoder
-        self.decoder = decoder
         self.autoencoder = autoencoder
 
+        print(self.autoencoder.summary())
+
     def train(self):
-        self.autoencoder.compile(optimizer=keras.optimizers.Adam(), loss='mse')
+        opt = keras.optimizers.Adam(learning_rate=0.001)
+        #nadam = keras.optimizers.Nadam(learning_rate=0.0001)
+        self.autoencoder.compile(optimizer=opt, loss='mse')
 
         log_dir = f'{self.log_dir}_{int(time())}'
 
@@ -200,7 +379,7 @@ class Sequential_Binner1(Binner):
 
         # begin pretraining
 
-        self.history = self.autoencoder.fit(self.feature_matrix, self.feature_matrix, batch_size=32, epochs=100,
+        self.history = self.autoencoder.fit(self.feature_matrix, self.feature_matrix, batch_size=400, epochs=1000,
                                                           validation_split=0.2, shuffle=True,
                                                           callbacks=[tensorboard_callback])
         np.save('latent_representation', self.encode(self.feature_matrix))
@@ -288,6 +467,7 @@ class DEC(Binner):
             # train on batch
             # if index == 0:
             #     np.random.shuffle(index_array)
+
             idx = index_array[index * batch_size: min((index + 1) * batch_size, x.shape[0])]
             loss = self.model.train_on_batch(x=x[idx], y=p[idx])
 
@@ -650,7 +830,8 @@ def get_clustering(cluster):
 binner_dict = {
     'DEC': Greedy_pretraining_DEC,
     'SEQ': Sequential_Binner1,
-    'DEC_XIFENG': DEC_Binner_Xifeng
+    'DEC_XIFENG': DEC_Binner_Xifeng,
+    'BAD': Badass_Binner
 }
 
 clustering_algorithms_dict = {

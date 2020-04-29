@@ -16,8 +16,10 @@ def cluster_ite(clusters):
         if True:
             clustername = 'cluster_' + str(clusternumber + 1)
 
-        for contig in contigs:
-            print(clustername, contig, sep='\t')
+
+        print(f'{clustername}, size: {len(contigs)}')
+        #for contig in contigs:
+            #print(clustername, contig, sep='\t')
 
         clusternumber += 1
         ncontigs += len(contigs)
@@ -42,10 +44,10 @@ def cluster_ite(clusters):
 
 latent_representation = np.load('latent_representation.npy')
 latent_representation_tf = tf.Variable(latent_representation)
-contig_names = np.load('contig_ids_high.npy')
+contig_names = np.load('/mnt/cami_high/contig_ids_high.npy')
 
-#it = vamb_clust.cluster(latent_representation)
-it = cluster.cluster(latent_representation_tf)
+it = vamb_clust.cluster(latent_representation)
+#it = cluster.cluster(latent_representation_tf)
 renamed = ((str(i+1), c.as_tuple(contig_names)[1]) for (i, c) in enumerate(it))
 cluster_ite(renamed)
-print("meh")
+print("Nice")

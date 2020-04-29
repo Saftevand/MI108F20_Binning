@@ -10,7 +10,7 @@ _MEDOID_RADIUS = 0.05
 
 _DELTA_X = 0.005
 _XMAX = 0.3
-
+#
 # This is the PDF of normal with µ=0, s=0.01 from -0.075 to 0.075 with intervals
 # of DELTA_X, for a total of 31 values. We multiply by _DELTA_X so the density
 # of one point sums to approximately one

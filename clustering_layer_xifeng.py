@@ -25,6 +25,7 @@ class ClusteringLayer(keras.layers.Layer):
         self.n_clusters = n_clusters
         self.alpha = alpha
         self.initial_weights = weights
+
         self.input_spec = keras.layers.InputSpec(ndim=2)
 
     def build(self, input_shape):

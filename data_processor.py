@@ -113,6 +113,8 @@ def get_featurematrix(args):
 
 
     feature_matrix = np.hstack([tnfs, depth])
+    #np.save("full_feature_matrix", feature_matrix)
+
     return feature_matrix, contig_ids
 
 

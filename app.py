@@ -35,9 +35,9 @@ def main():
                                            binner_type=args.binnertype, feature_matrix=feature_matrix,
                                            contig_ids=contig_ids, log_dir=args.outdir)
 
-    adam = keras.optimizers.Adam(learning_rate=0.0001)
 
-    binner_instance.do_binning(pretrain_epochs=300, n_clusters=1074, init='glorot_uniform', max_iterations=600, pretrain_optimizer=adam)
+
+    binner_instance.do_binning([100, 100, 50])
 
     results = binner_instance.get_assignments()
 
