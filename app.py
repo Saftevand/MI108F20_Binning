@@ -37,7 +37,7 @@ def main():
 
 
 
-    binner_instance.do_binning([100, 100, 50])
+    binner_instance.do_iris_binning()
 
     results = binner_instance.get_assignments()
 

@@ -159,3 +159,7 @@ numpy_test.py
 latent_representation.npy
 
 contig_ids_high.npy
+
+lassetest.py
+
+latent.npz

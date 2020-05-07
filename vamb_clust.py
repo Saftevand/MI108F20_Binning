@@ -4,6 +4,8 @@ import random as _random
 from collections import defaultdict as _defaultdict, deque as _deque
 from math import ceil as _ceil
 import vamb.vambtools as _vambtools
+import torchvision
+import tensorflow as tf
 _DEFAULT_RADIUS = 0.06
 # Distance within which to search for medoid point
 _MEDOID_RADIUS = 0.05
@@ -239,6 +241,7 @@ class ClusterGenerator:
                     self.attempts.clear()
                     self.successes = 0
 
+        print(threshold)
         # These are the points of the final cluster AFTER establishing the threshold used
         points = _smaller_indices(distances, self.kept_mask, threshold, self.CUDA)
         isdefault = success is None and threshold == _DEFAULT_RADIUS and self.peak_valley_ratio > 0.55
@@ -270,13 +273,14 @@ def _find_threshold(histogram, peak_valley_ratio, cuda):
     be found, True if a good threshold could be found, and None if the point is
     alone, or the threshold has been used.
     """
+
     peak_density = 0
     peak_over = False
     minimum_x = None
     density_at_minimum = None
     threshold = None
     success = False
-    delta_x = _XMAX / len(histogram)
+    delta_x = _XMAX / len(histogram) # len(histogram) = 60
 
     # If the point is a loner, immediately return a threshold in where only
     # that point is contained.
@@ -310,17 +314,21 @@ def _find_threshold(histogram, peak_valley_ratio, cuda):
             minimum_x, density_at_minimum = x, density
 
             # If this minimum is below ratio * peak, it's accepted as threshold
+            # peak_valley_ratio = 0.1
             if density < peak_valley_ratio * peak_density:
                 threshold = minimum_x
                 success = True
-
+        # delta_x = X_MAX / len(histogram) (=) 0.3/60 = 0.005
+        # X_MAX = 0.3
         x += delta_x
 
+    # Hvis vi har fundet threshold - og den er for høj.
     # Don't allow a threshold too high - this is relaxed with p_v_ratio
     if threshold is not None and threshold > 0.2 + peak_valley_ratio:
         threshold = None
         success = False
 
+    # vi kan ikke finde threshold - vi har prøvet mange gange --> pv ratio er blevet for høj
     # If ratio has been set to 0.6, we do not accept returning no threshold.
     if threshold is None and peak_valley_ratio > 0.55:
         threshold = _DEFAULT_RADIUS
@@ -366,6 +374,12 @@ def _calc_distances(matrix, index):
     dists[index] = 0.0 # avoid float rounding errors
     return dists
 
+def _calc_distances_euclidean(matrix, index):
+    dists = _torch.norm(matrix - matrix[index], dim=1)
+    dists = dists / dists.max()
+    dists[index] = 0
+    return dists
+
 def _sample_medoid(matrix, kept_mask, medoid, threshold, cuda):
     """Returns:
     - A vector of indices to points within threshold
@@ -373,7 +387,7 @@ def _sample_medoid(matrix, kept_mask, medoid, threshold, cuda):
     - The mean distance from medoid to the other points in the first vector
     """
 
-    distances = _calc_distances(matrix, medoid)
+    distances = _calc_distances_euclidean(matrix, medoid)
     cluster = _smaller_indices(distances, kept_mask, threshold, cuda)
 
     if len(cluster) == 1:

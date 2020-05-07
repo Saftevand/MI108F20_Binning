@@ -6,10 +6,15 @@ from tensorflow import keras
 import numpy as np
 from clustering_layer_xifeng import ClusteringLayer
 from sklearn.cluster import KMeans
-from time import time
+from sklearn import datasets, preprocessing
+import time
+import matplotlib.pyplot as plt
+import cudf
+import io
+from cuml import TSNE
 import sys
 import vamb_clust
-
+from itertools import cycle, islice
 
 
 
@@ -152,15 +157,367 @@ class Badass_Binner(Binner):
         self.bins = self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix))
         return self.bins
 
-    def build_model(self, layers):
+    def do_iris_binning(self):
+        iris = datasets.load_iris()
+        X = iris.data
 
+        scaler = preprocessing.MinMaxScaler()
+        scaler.fit(X)
+        X = scaler.transform(X)
+
+        print(X)
+        y = iris.target
+        print(y)
+
+        # TODO lige nu er det bygget til iris data. --> kører ned til 2 dims -->  ingen tSNE
+        self.build_pretraining_model([10,10, 2], True, 4, learning_rate=0.001) #default adam = 0.001
+        self.pretrain(X, y, batch_size=16, epochs=100, validation_split=0.2, shuffle=True)
+        self.include_clustering_loss(learning_rate=0.0001)
+        self.fit_iris(x=X, y=y, epochs=20)
+
+
+        #self.bins = self.clustering_method.do_clustering(self.encoder.predict(X))
+        #return self.bins
+
+    def build_pretraining_model(self, layers, toy_data=False, toy_dims=4, learning_rate=0.001):
+
+        init = "glorot_uniform"
+        activation = "elu"
+
+        if toy_data:
+            input_shape = toy_dims
+        else:
+            input_shape = self.feature_matrix.shape[1]
+
+        if len(layers) == 1:
+            encoder_input = keras.layers.Input(shape=(input_shape,), name="non_sequential")
+            enc = keras.layers.Dense(layers[0], activation=activation, name=f'Encoder_Layer')(encoder_input)
+            decoder_output = keras.layers.Dense(input_shape, activation="sigmoid")(enc)
+
+            autoencoder = keras.Model(inputs=encoder_input, outputs=decoder_output, name="autoencoder")
+            encoder = keras.Model(encoder_input, enc, name="encoder")
+
+            opt = keras.optimizers.Adam(learning_rate=learning_rate)
+
+            self.encoder = encoder
+            self.autoencoder = autoencoder
+            self.autoencoder.compile(optimizer=opt, loss='mse')
+
+            print(self.autoencoder.summary())
+            print(self.encoder.summary())
+            return
+
+        # Encoder
+        encoder_input = keras.layers.Input(shape=(input_shape,), name="non_sequential")
+        enc = encoder_input
+
+        # This layer? should we have it?
+        #enc = keras.layers.Activation(activation)(encoder_input)
+
+        layer_no = 1
+        for layer in layers[:-1]:
+            enc = keras.layers.Dense(layer, activation=activation, kernel_initializer=init,
+                                     name=f'Encoder_Layer_{layer_no}')(enc)
+            layer_no += 1
+
+        # latent layer
+        out = keras.layers.Dense(layers[-1], kernel_initializer=init, name='latent_layer')(enc)
+
+        # create encoder
+        encoder = keras.Model(encoder_input, out, name="encoder")
+
+        # first layer of decoder outside loop - we need to get hold of encoder_output to define encoder and extra output
+        layers.reverse()
+        layers.pop(0)
+        print(layers)
+        layer_no = 1
+
+        for layer in layers:
+            out = keras.layers.Dense(layer, activation=activation, kernel_initializer=init,
+                                     name=f'Decoder_layer_{layer_no}')(out)
+            layer_no += 1
+        decoder_output = keras.layers.Dense(input_shape, activation="sigmoid", kernel_initializer=init)(out)
+
+
+        autoencoder = keras.Model(inputs=encoder_input, outputs=decoder_output, name="autoencoder")
+
+        self.encoder = encoder
+        self.autoencoder = autoencoder
+
+        opt = keras.optimizers.Adam(learning_rate=learning_rate)
+
+        # We can put loss_weights=[0.9, 0.1] into the compile method to add weights to losses - regularization
+        self.autoencoder.compile(optimizer=opt, loss='mse')
+
+        print(self.autoencoder.summary())
+        print(self.encoder.summary())
+
+    def pretrain(self, x, y, batch_size=30, epochs=60, validation_split=0.2, shuffle=True):
+        log_dir = f'{self.log_dir}_pretraining_{time.strftime("%Y%m%d-%H%M%S")}'
+
+        def plot_to_image(figure):
+            """Converts the matplotlib plot specified by 'figure' to a PNG image and
+            returns it. The supplied figure is closed and inaccessible after this call."""
+            # Save the plot to a PNG in memory.
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            # Closing the figure prevents it from being displayed directly inside
+            # the notebook.
+            plt.close(figure)
+            buf.seek(0)
+            # Convert PNG buffer to TF image
+            image = tf.image.decode_png(buf.getvalue(), channels=4)
+            # Add the batch dimension
+            image = tf.expand_dims(image, 0)
+            return image
+
+        def embeddings(epoch, logs):
+            file_write_embeddings = tf.summary.create_file_writer(log_dir + 'pretrain_embeddings')
+            # TODO we do not have to encode here. THe clustering part encodes all data at each batch. could be shared
+            encoded_data = self.encoder.predict(x=x)
+            # embedded = TSNE(n_components=2).fit_transform(encoded_data)
+            figure = plt.figure(figsize=(8, 8))
+            plt.title("Pretrain_embeddings")
+            # x = encoded_data[:, 0]
+            # y = encoded_data[:, 1]
+            # farvelade ---------------------------
+            colors = np.array(list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
+                                          int(max(y) + 1))))
+            plt.scatter(encoded_data[:, 0], encoded_data[:, 1], s=6, color=colors[y])
+
+            # plt.scatter(x, y, s=2, cmap=plt.cm.get_cmap("jet", 256))
+            plt.colorbar(ticks=range(256))
+            plt.clim(-0.5, 9.5)
+            image = plot_to_image(figure)
+            with file_write_embeddings.as_default():
+                tf.summary.image("Pretrain_Embeddings", image, step=epoch)
+
+        embedding_callback = keras.callbacks.LambdaCallback(on_epoch_end=embeddings)
+
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
+        # begin pretraining
+        self.history = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs,
+                                            validation_split=validation_split, shuffle=shuffle,
+                                            callbacks=[tensorboard_callback, embedding_callback])
+        #np.save('latent_representation', self.encode(self.feature_matrix))
+
+    def include_clustering_loss(self, learning_rate=0.001):
+        output_of_input = self.autoencoder.layers[0].output
+        decoder_output = self.autoencoder.layers[-1].output
+        latent_output = self.autoencoder.get_layer('latent_layer').output
+
+        rerouted_autoencoder = keras.Model(inputs=[output_of_input], outputs=[decoder_output, latent_output],
+                                           name='2outs_autoencoder')
+
+        opt = keras.optimizers.Adam(learning_rate=learning_rate)
+
+        def cosine_dist(y_true, y_pred):
+            losses = tf.keras.losses.CosineSimilarity(axis=1)(y_true, y_pred)
+
+            return tf.abs(losses)
+        # , loss_weights=[0., 1.]
+        rerouted_autoencoder.compile(optimizer=opt, loss=['mse', 'mse'])
+
+        self.autoencoder = rerouted_autoencoder
+
+        print(self.autoencoder.summary())
+
+    def fit_iris(self, x, y=None, batch_size=5, epochs=30):
+        labels = y
+
+        timestr = time.strftime("%Y%m%d-%H%M%S")
+        logdir = self.log_dir + '_IRIS_' + timestr
+        tensorboard = keras.callbacks.TensorBoard(
+            log_dir=logdir,
+            histogram_freq=0,
+            batch_size=batch_size,
+            write_graph=True,
+            write_grads=True
+        )
+
+        def plot_to_image(figure):
+            """Converts the matplotlib plot specified by 'figure' to a PNG image and
+            returns it. The supplied figure is closed and inaccessible after this call."""
+            # Save the plot to a PNG in memory.
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            # Closing the figure prevents it from being displayed directly inside
+            # the notebook.
+            plt.close(figure)
+            buf.seek(0)
+            # Convert PNG buffer to TF image
+            image = tf.image.decode_png(buf.getvalue(), channels=4)
+            # Add the batch dimension
+            image = tf.expand_dims(image, 0)
+            return image
+
+        def embeddings(epoch, labels, assignments, medoids):
+            file_write_embeddings = tf.summary.create_file_writer(logdir + 'embeddings')
+            # TODO we do not have to encode here. THe clustering part encodes all data at each batch. could be shared
+            encoded_data = self.encoder.predict(x=x)
+            #embedded = TSNE(n_components=2).fit_transform(encoded_data)
+            figure = plt.figure(figsize=(12, 12))
+            plt.title("Embeddings")
+            #x = encoded_data[:, 0]
+            #y = encoded_data[:, 1]
+            X = encoded_data
+            # farvelade ---------------------------
+            colors = np.array(list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
+                                          int(max(labels) + 1))))
+            plt.scatter(X[:, 0], X[:, 1], s=12, color=colors[labels])
+
+            #plt.scatter(x, y, s=2, cmap=plt.cm.get_cmap("jet", 256))
+
+            image = plot_to_image(figure)
+            with file_write_embeddings.as_default():
+                tf.summary.image("Embeddings", image, step=epoch)
+
+
+            '''Save cluster embeddings'''
+            file_write_embeddings = tf.summary.create_file_writer(logdir + 'cluster_embeddings')
+            # TODO we do not have to encode here. THe clustering part encodes all data at each batch. could be shared
+            encoded_data = self.encoder.predict(x=x)
+            # embedded = TSNE(n_components=2).fit_transform(encoded_data)
+            figure = plt.figure(figsize=(12, 12))
+            plt.title("Cluster_embeddings")
+            # x = encoded_data[:, 0]
+            # y = encoded_data[:, 1]
+            X = encoded_data
+            # farvelade ---------------------------
+            medoid_labels = [i for i, c in enumerate(medoids)]
+            print(medoid_labels)
+            colors = np.array(
+                list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
+                            int(max(medoid_labels) + 1))))
+            plt.scatter(medoids[:, 0], medoids[:, 1], s=600, color=colors[medoid_labels], marker=".")
+            print(medoid_labels)
+
+            # plt.scatter(x, y, s=2, cmap=plt.cm.get_cmap("jet", 256))
+
+            colors = np.array(
+                list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
+                            int(max(assignments) + 1))))
+            plt.scatter(X[:, 0], X[:, 1], s=50, color=colors[assignments], marker="x")
+            print(assignments)
+
+            image = plot_to_image(figure)
+            with file_write_embeddings.as_default():
+                tf.summary.image("Cluster_Embeddings", image, step=epoch)
+
+
+
+
+
+        data = np.copy(x)
+
+        no_batches = len(x) / batch_size
+
+        # 1. get appropriate batch
+
+        '''Next 15 lines regarding tensorboard and callbacks are from Stack overflow user: "erenon"
+           https://stackoverflow.com/questions/44861149/keras-use-tensorboard-with-train-on-batch'''
+        # create tf callback
+
+        # embeddings_callback = keras.callbacks.LambdaCallback(on_epoch_end=tsne_embeddings)
+        tensorboard.set_model(self.autoencoder)
+
+        # Transform train_on_batch return value
+        # to dict expected by on_batch_end callback
+        def named_logs(model, logs):
+            result = {}
+            for l in zip(model.metrics_names, logs):
+                result[l[0]] = l[1]
+            return result
+
+        for i in range(epochs):
+
+            indices = np.arange(len(data))
+            np.random.RandomState(i).shuffle(data)
+            np.random.RandomState(i).shuffle(indices)
+            batches = np.array_split(data, no_batches)
+            batch_indices_list = np.array_split(indices, no_batches)
+            amount_batches = len(batches)
+
+            print(f'Current epoch: {i + 1} of total epochs: {epochs}')
+            total_loss = 0
+            reconstruct_loss = 0
+            cluster_loss = 0
+            for batch_no, batch in enumerate(batches):
+                batch_indices = batch_indices_list[batch_no]
+                print(f'Current batch: {batch_no + 1} of total batches: {amount_batches}')
+
+                # 2. encode all data
+                encoded_data_full = self.encode(data).numpy()
+
+                # 3. cluster
+                assigned_medoids_per_contig = np.zeros(encoded_data_full.shape)
+
+                # Kan gøres bedre, assigne mens, clusters bliver lavet
+
+                cluster_generator = vamb_clust.cluster(encoded_data_full)
+
+                clusters = ((encoded_data_full[c.medoid], c.members) for (i, c) in enumerate(cluster_generator))
+
+
+                no_clusters = 0
+                intermediate_clusters = []
+                medoids = []
+
+                for medoid, members in clusters:
+                    medoids.append(medoid)
+                    for member in members:
+                        assigned_medoids_per_contig[member] = medoid
+                        intermediate_clusters.append(no_clusters)
+                    no_clusters += 1
+
+                print(f'No. clusters: {no_clusters}')
+                np_medoids = np.array(medoids)
+
+
+                truth_medoids = tf.gather(params=assigned_medoids_per_contig, indices=batch_indices)
+
+                list_of_losses = self.autoencoder.train_on_batch(x=[batch], y=[batch, truth_medoids])
+                # print(self.autoencoder.metrics_names)
+                # print(list_of_losses)
+
+                total_loss += list_of_losses[0]
+                reconstruct_loss += list_of_losses[1]
+                cluster_loss += list_of_losses[2]
+
+
+
+
+            history_obj = list()
+            tot_avg = total_loss / amount_batches
+            history_obj.append(tot_avg)
+
+            recon_avg = reconstruct_loss / amount_batches
+            history_obj.append(recon_avg)
+
+            clust_avg = cluster_loss / amount_batches
+            history_obj.append(clust_avg)
+
+            print(f'Total loss: {tot_avg}, \t Reconst loss: {recon_avg}, \t Clust loss: {clust_avg}')
+
+
+
+            embeddings(i + 1, labels=labels, assignments=intermediate_clusters, medoids=np_medoids)
+            tensorboard.on_epoch_end(i + 1, named_logs(self.autoencoder, history_obj))
+
+        tensorboard.on_train_end(None)
+
+    def build_model(self, layers, toy_data=False, toy_size=4, learning_rate=0.001):
 
         self.encoding_size = 50
 
         init = "glorot_uniform"
         activation = "elu"
 
-        input_shape = self.feature_matrix.shape[1]
+        if toy_data:
+            input_shape = toy_size
+        else:
+            input_shape = self.feature_matrix.shape[1]
 
         #Encoder
         encoder_input = keras.layers.Input(shape=(input_shape,), name="non_sequential")
@@ -175,6 +532,8 @@ class Badass_Binner(Binner):
             layer_no += 1
 
         encoder_output = keras.layers.Dense(layers[-1], kernel_initializer=init, name='latent_layer')(enc)
+
+
 
         encoder = keras.Model(encoder_input, encoder_output, name="encoder")
 
@@ -203,15 +562,18 @@ class Badass_Binner(Binner):
         self.encoder = encoder
         self.autoencoder = autoencoder
 
-        opt = keras.optimizers.Adam(learning_rate=0.001)
+        opt = keras.optimizers.Adam(learning_rate=learning_rate)
 
+        def cosine_dist(y_true, y_pred):
+            losses = tf.keras.losses.CosineSimilarity(axis=1)(y_true, y_pred)
+
+            return tf.abs(losses)
 
         # We can put loss_weights=[0.9, 0.1] into the compile method to add weights to losses - regularization
-        self.autoencoder.compile(optimizer=opt, loss=['mse', 'mse'], experimental_run_tf_function=False)
+        self.autoencoder.compile(optimizer=opt, loss=['mse', cosine_dist])
 
         print(self.autoencoder.summary())
         print(self.encoder.summary())
-
 
     def train(self, batch_size=400, epochs=100, validation_split=0.2, shuffle=True):
 
@@ -234,7 +596,48 @@ class Badass_Binner(Binner):
     def decode(self, input):
         return self.decoder(input)
 
-    def fit(self, x, y=None, batch_size=400, epochs=6):
+    def fit(self, x, y=None, batch_size=4000, epochs=10):
+        timestr = time.strftime("%Y%m%d-%H%M%S")
+        logdir = self.log_dir + '_' + timestr
+        tensorboard = keras.callbacks.TensorBoard(
+            log_dir=logdir,
+            histogram_freq=0,
+            batch_size=batch_size,
+            write_graph=True,
+            write_grads=True
+        )
+
+        def plot_to_image(figure):
+            """Converts the matplotlib plot specified by 'figure' to a PNG image and
+            returns it. The supplied figure is closed and inaccessible after this call."""
+            # Save the plot to a PNG in memory.
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            # Closing the figure prevents it from being displayed directly inside
+            # the notebook.
+            plt.close(figure)
+            buf.seek(0)
+            # Convert PNG buffer to TF image
+            image = tf.image.decode_png(buf.getvalue(), channels=4)
+            # Add the batch dimension
+            image = tf.expand_dims(image, 0)
+            return image
+
+        def tsne_embeddings(epoch, logs=None):
+            file_write_embeddings = tf.summary.create_file_writer(logdir + 'embeddings')
+            encoded_data = self.encoder.predict(x=self.feature_matrix)
+            embedded = TSNE(n_components=2).fit_transform(encoded_data)
+            figure = plt.figure(figsize=(8, 8))
+            plt.title("Embeddings")
+            x = embedded[:, 0]
+            y = embedded[:, 1]
+            plt.scatter(x, y, s=2, cmap=plt.cm.get_cmap("jet", 256))
+            plt.colorbar(ticks=range(256))
+            plt.clim(-0.5, 9.5)
+            image = plot_to_image(figure)
+            with file_write_embeddings.as_default():
+                tf.summary.image("Embeddings", image, step=epoch)
+
 
         data = np.copy(x)
 
@@ -246,13 +649,8 @@ class Badass_Binner(Binner):
         '''Next 15 lines regarding tensorboard and callbacks are from Stack overflow user: "erenon"
            https://stackoverflow.com/questions/44861149/keras-use-tensorboard-with-train-on-batch'''
         # create tf callback
-        tensorboard = keras.callbacks.TensorBoard(
-            log_dir='results/my_tf_logs',
-            histogram_freq=0,
-            batch_size=batch_size,
-            write_graph=True,
-            write_grads=True
-        )
+
+        #embeddings_callback = keras.callbacks.LambdaCallback(on_epoch_end=tsne_embeddings)
         tensorboard.set_model(self.autoencoder)
 
         # Transform train_on_batch return value
@@ -292,9 +690,14 @@ class Badass_Binner(Binner):
 
                 clusters = ((encoded_data_full[c.medoid], c.members) for (i, c) in enumerate(cluster_generator))
 
+                no_clusters = 0
                 for medoid, members in clusters:
+                    no_clusters += 1
                     for member in members:
                         assigned_medoids_per_contig[member] = medoid
+
+                print(f'No. clusters: {no_clusters}')
+
 
                 truth_medoids = tf.gather(params=assigned_medoids_per_contig, indices=batch_indices)
 
@@ -307,13 +710,23 @@ class Badass_Binner(Binner):
                 cluster_loss += list_of_losses[2]
 
             history_obj = list()
-            history_obj.append(total_loss / amount_batches)
-            history_obj.append(reconstruct_loss / amount_batches)
-            history_obj.append(cluster_loss / amount_batches)
+            tot_avg = total_loss / amount_batches
+            history_obj.append(tot_avg)
 
+            recon_avg = reconstruct_loss / amount_batches
+            history_obj.append(recon_avg)
+
+            clust_avg = cluster_loss / amount_batches
+            history_obj.append(clust_avg)
+
+            print(f'Total loss: {tot_avg}, \t Reconst loss: {recon_avg}, \t Clust loss: {clust_avg}')
+
+            tsne_embeddings(i+1)
             tensorboard.on_epoch_end(i+1, named_logs(self.autoencoder, history_obj))
 
         tensorboard.on_train_end(None)
+
+
 
 
 class Sequential_Binner1(Binner):
@@ -389,8 +802,6 @@ class Sequential_Binner1(Binner):
 
     def decode(self, input):
         return self.decoder(input)
-
-
 
 
 class DEC(Binner):
@@ -807,6 +1218,7 @@ class DEC_Binner_Xifeng(DEC):
 
         return keras.models.Model(inputs=x, outputs=y, name='AE'), keras.models.Model(inputs=x, outputs=h,
                                                                                       name='encoder')
+
 
 
 def create_binner(split_value, binner_type, clustering_method, contig_ids, feature_matrix, log_dir):
