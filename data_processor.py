@@ -149,3 +149,47 @@ def np2cudf(df):
     for c,column in enumerate(df):
       pdf[str(c)] = df[column]
     return pdf
+
+def get_cami_data_truth(path):
+    with open(path, 'r') as input_file:
+        # skips headers
+        for _ in range(0, 4):
+            next(input_file)
+
+        ids = []
+        contig_ids = []
+        binid_to_int = defaultdict()
+        contigid_to_binid = defaultdict()
+
+        new_id = 0
+        for line in input_file:
+            line_elems = line.split('\t')
+            bin_id = line_elems[1]
+            cont_name = line_elems[0]
+            contig_ids.append(line_elems[0])
+
+            if bin_id in binid_to_int:
+                id_int = binid_to_int[bin_id]
+
+                # used for mapping contig id to bin id
+                contigid_to_binid[cont_name] = id_int
+            else:
+                # new bin id
+                binid_to_int[bin_id] = new_id
+                id_int = new_id
+
+                # used for mapping contig id to bin id
+                contigid_to_binid[cont_name] = id_int
+
+                new_id += 1
+
+            ids.append(id_int)
+
+    return ids, contig_ids, contigid_to_binid
+
+
+def sort_bins_follow_input(contig_ids: [int], contig_to_bin_id: defaultdict):
+    var = []
+    for i in contig_ids:
+        var.append(contig_to_bin_id[i])
+    return var

@@ -15,6 +15,7 @@ from cuml import TSNE
 import sys
 import vamb_clust
 from itertools import cycle, islice
+from collections import Counter
 
 
 
@@ -161,19 +162,28 @@ class Badass_Binner(Binner):
         iris = datasets.load_iris()
         X = iris.data
 
+        #gen noise
+        dim1 = np.random.uniform(3., 8., 50)
+        dim2 = np.random.uniform(1., 5., 50)
+        dim3 = np.random.uniform(0., 6., 50)
+        dim4 = np.random.uniform(-1., 4, 50)
+
+        noise = np.stack([dim1, dim2, dim3, dim4], axis=1)
+        X = np.vstack((X, noise))
+
         scaler = preprocessing.MinMaxScaler()
         scaler.fit(X)
         X = scaler.transform(X)
 
-        print(X)
         y = iris.target
-        print(y)
+
+        y = np.append(y,[3 for _ in range(50)])
 
         # TODO lige nu er det bygget til iris data. --> kører ned til 2 dims -->  ingen tSNE
-        self.build_pretraining_model([10,10, 2], True, 4, learning_rate=0.001) #default adam = 0.001
-        self.pretrain(X, y, batch_size=16, epochs=100, validation_split=0.2, shuffle=True)
-        self.include_clustering_loss(learning_rate=0.0001)
-        self.fit_iris(x=X, y=y, epochs=20)
+        self.build_pretraining_model([4,10, 2], True, 4, learning_rate=0.0001) #default adam = 0.001
+        self.pretrain(X, y, batch_size=10, epochs=200, validation_split=0.2, shuffle=True)
+        self.include_clustering_loss(learning_rate=0.0001, loss_weights=[0.5, 0.5])
+        self.fit_iris(x=X, y=y, batch_size=20, epochs=5, cuda=False)
 
 
         #self.bins = self.clustering_method.do_clustering(self.encoder.predict(X))
@@ -276,8 +286,11 @@ class Badass_Binner(Binner):
             # TODO we do not have to encode here. THe clustering part encodes all data at each batch. could be shared
             encoded_data = self.encoder.predict(x=x)
             # embedded = TSNE(n_components=2).fit_transform(encoded_data)
-            figure = plt.figure(figsize=(8, 8))
+            figure = plt.figure(figsize=(10, 10))
             plt.title("Pretrain_embeddings")
+            axes = plt.gca()
+            axes.set_xlim([-1.5, 1.5])
+            axes.set_ylim([-1.5, 1.5])
             # x = encoded_data[:, 0]
             # y = encoded_data[:, 1]
             # farvelade ---------------------------
@@ -285,9 +298,6 @@ class Badass_Binner(Binner):
                                           int(max(y) + 1))))
             plt.scatter(encoded_data[:, 0], encoded_data[:, 1], s=6, color=colors[y])
 
-            # plt.scatter(x, y, s=2, cmap=plt.cm.get_cmap("jet", 256))
-            plt.colorbar(ticks=range(256))
-            plt.clim(-0.5, 9.5)
             image = plot_to_image(figure)
             with file_write_embeddings.as_default():
                 tf.summary.image("Pretrain_Embeddings", image, step=epoch)
@@ -302,7 +312,7 @@ class Badass_Binner(Binner):
                                             callbacks=[tensorboard_callback, embedding_callback])
         #np.save('latent_representation', self.encode(self.feature_matrix))
 
-    def include_clustering_loss(self, learning_rate=0.001):
+    def include_clustering_loss(self, learning_rate=0.001, loss_weights=[0.5, 0.5]):
         output_of_input = self.autoencoder.layers[0].output
         decoder_output = self.autoencoder.layers[-1].output
         latent_output = self.autoencoder.get_layer('latent_layer').output
@@ -317,13 +327,13 @@ class Badass_Binner(Binner):
 
             return tf.abs(losses)
         # , loss_weights=[0., 1.]
-        rerouted_autoencoder.compile(optimizer=opt, loss=['mse', 'mse'])
+        rerouted_autoencoder.compile(optimizer=opt, loss=['mse', 'mse'], loss_weights=loss_weights)
 
         self.autoencoder = rerouted_autoencoder
 
         print(self.autoencoder.summary())
 
-    def fit_iris(self, x, y=None, batch_size=5, epochs=30):
+    def fit_iris(self, x, y=None, batch_size=5, epochs=30, cuda=False):
         labels = y
 
         timestr = time.strftime("%Y%m%d-%H%M%S")
@@ -352,46 +362,142 @@ class Badass_Binner(Binner):
             image = tf.expand_dims(image, 0)
             return image
 
-        def embeddings(epoch, labels, assignments, medoids):
+        def embeddings(epoch, labels, assignments, medoids, encodings):
             file_write_embeddings = tf.summary.create_file_writer(logdir + 'embeddings')
             # TODO we do not have to encode here. THe clustering part encodes all data at each batch. could be shared
-            encoded_data = self.encoder.predict(x=x)
-            #embedded = TSNE(n_components=2).fit_transform(encoded_data)
-            figure = plt.figure(figsize=(12, 12))
-            plt.title("Embeddings")
-            #x = encoded_data[:, 0]
-            #y = encoded_data[:, 1]
-            X = encoded_data
-            # farvelade ---------------------------
-            colors = np.array(list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
-                                          int(max(labels) + 1))))
-            plt.scatter(X[:, 0], X[:, 1], s=12, color=colors[labels])
+            encoded_data = encodings
 
-            #plt.scatter(x, y, s=2, cmap=plt.cm.get_cmap("jet", 256))
+            figure = plt.figure(figsize=(10, 10))
+            plt.title("Embeddings")
+            axes = plt.gca()
+            axes.set_xlim([-1.5, 1.5])
+            axes.set_ylim([-1.5, 1.5])
+            X = encoded_data
+
+            colors = np.array(
+                list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
+                            int(max(labels) + 1))))
+            plt.scatter(X[:, 0], X[:, 1], s=12, color=colors[labels])
 
             image = plot_to_image(figure)
             with file_write_embeddings.as_default():
                 tf.summary.image("Embeddings", image, step=epoch)
 
 
+            # assignments = [0,0,0,0,1,1,1,1,2,2,2,......]
             '''Save cluster embeddings'''
+            # returns list with only 1 element
+            largest_cluster_indices = []
+            second_largest_indices = []
+            small_clusters_indices = []
+            third_clust_indices = []
+
+            # index (assignment) of largest cluster
+            counter = Counter(assignments).most_common(3)
+            most_common_cluster = counter[0][0]
+            second_most_common_cluster = counter[1][0]
+            trd_cluster = counter[2][0]
+            print(f'Largest cluster ID : {most_common_cluster}')
+
+            print(assignments)
+            print(most_common_cluster)
+            print(medoids)
+
+            mask = np.ones(len(medoids), dtype=bool)
+            mask[most_common_cluster] = False
+            mask[second_most_common_cluster] = False
+            mask[trd_cluster] = False
+
+            most_common_medoid = medoids[most_common_cluster]
+            second_most_common_medoid = medoids[second_most_common_cluster]
+            third_clust_medoid = medoids[trd_cluster]
+
+            medoids_small_clusters = medoids[mask]
+
+
+            for i, point in enumerate(assignments):
+                #largest_cluster_indices.append(i) if point == most_common_cluster else second_largest_indices.append(i) if point == second_most_common_cluster else third_clust_medoid.append(i) if point == third_clust_medoid else small_clusters_indices.append(i)
+                largest_cluster_indices.append(i) if point == most_common_cluster else second_largest_indices.append(
+                i) if point == second_most_common_cluster else third_clust_indices.append(
+                i) if point == trd_cluster else small_clusters_indices.append(i)
+
+            mask = np.zeros(len(X), dtype=bool)
+            mask[largest_cluster_indices] = True
+
+            large_cluster = X[mask]
+
+
+            mask[largest_cluster_indices] = False
+
+            mask[second_largest_indices] = True
+
+            second_cluster = X[mask]
+
+            mask[second_largest_indices] = False
+
+            mask[third_clust_indices] = True
+
+            third_cluster = X[mask]
+
+            mask[third_clust_indices] = True
+            mask[second_largest_indices] = True
+            mask[largest_cluster_indices] = True
+
+            small_clusters = X[~mask]
+
+
+
+
+
+
+
             file_write_embeddings = tf.summary.create_file_writer(logdir + 'cluster_embeddings')
             # TODO we do not have to encode here. THe clustering part encodes all data at each batch. could be shared
-            encoded_data = self.encoder.predict(x=x)
+            # encoded_data = self.encoder.predict(x=x)
             # embedded = TSNE(n_components=2).fit_transform(encoded_data)
-            figure = plt.figure(figsize=(12, 12))
+            figure = plt.figure(figsize=(10, 10))
             plt.title("Cluster_embeddings")
+            axes = plt.gca()
+            axes.set_xlim([-1.5, 1.5])
+            axes.set_ylim([-1.5, 1.5])
             # x = encoded_data[:, 0]
             # y = encoded_data[:, 1]
             X = encoded_data
             # farvelade ---------------------------
+
             medoid_labels = [i for i, c in enumerate(medoids)]
-            print(medoid_labels)
+
+            colors = np.array(list(islice(cycle(['black']), len(medoids))))
+            print(colors)
+            print(medoids)
+            print(f'X: {X[0]}')
+            x,y = medoids[:, 0], medoids[:, 1]
+            print(x)
+            print(y)
+
+            plt.scatter(medoids_small_clusters[:, 0], medoids_small_clusters[:, 1], s=600, color='black', marker=".")
+            plt.scatter(small_clusters[:, 0], small_clusters[:, 1], s=50, color='darkorange', marker="x")
+
+            # plot largest cluster
+            plt.scatter(most_common_medoid[0], most_common_medoid[1], s=600, color='red', marker=".")
+            plt.scatter(large_cluster[:, 0], large_cluster[:, 1], s=50, color='blue', marker="x")
+
+            # plot second largest cluster
+            plt.scatter(second_most_common_medoid[0], second_most_common_medoid[1], s=600, color='limegreen', marker=".")
+            plt.scatter(second_cluster[:, 0], second_cluster[:, 1], s=50, color='darkgreen', marker="x")
+
+            # plot 3rd largest cluster
+            plt.scatter(third_clust_medoid[0], third_clust_medoid[1], s=600, color='magenta', marker=".")
+            plt.scatter(third_cluster[:, 0], third_cluster[:, 1], s=50, color='gray', marker="x")
+
+            '''
+            medoid_labels = [i for i, c in enumerate(medoids)]
+            
+            
             colors = np.array(
                 list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
                             int(max(medoid_labels) + 1))))
             plt.scatter(medoids[:, 0], medoids[:, 1], s=600, color=colors[medoid_labels], marker=".")
-            print(medoid_labels)
 
             # plt.scatter(x, y, s=2, cmap=plt.cm.get_cmap("jet", 256))
 
@@ -399,17 +505,14 @@ class Badass_Binner(Binner):
                 list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
                             int(max(assignments) + 1))))
             plt.scatter(X[:, 0], X[:, 1], s=50, color=colors[assignments], marker="x")
-            print(assignments)
+            '''
 
             image = plot_to_image(figure)
             with file_write_embeddings.as_default():
                 tf.summary.image("Cluster_Embeddings", image, step=epoch)
 
-
-
-
-
         data = np.copy(x)
+        indices = np.arange(len(data))
 
         no_batches = len(x) / batch_size
 
@@ -432,9 +535,9 @@ class Badass_Binner(Binner):
 
         for i in range(epochs):
 
-            indices = np.arange(len(data))
             np.random.RandomState(i).shuffle(data)
             np.random.RandomState(i).shuffle(indices)
+            np.random.RandomState(i).shuffle(y)
             batches = np.array_split(data, no_batches)
             batch_indices_list = np.array_split(indices, no_batches)
             amount_batches = len(batches)
@@ -445,16 +548,233 @@ class Badass_Binner(Binner):
             cluster_loss = 0
             for batch_no, batch in enumerate(batches):
                 batch_indices = batch_indices_list[batch_no]
-                print(f'Current batch: {batch_no + 1} of total batches: {amount_batches}')
+                # print(f'Current batch: {batch_no + 1} of total batches: {amount_batches}')
 
                 # 2. encode all data
                 encoded_data_full = self.encode(data).numpy()
 
                 # 3. cluster
-                assigned_medoids_per_contig = np.zeros(encoded_data_full.shape)
+
+                contig_medoid_assignment = np.zeros(encoded_data_full.shape)
 
                 # Kan gøres bedre, assigne mens, clusters bliver lavet
 
+                cluster_generator = vamb_clust.cluster(encoded_data_full, cuda=cuda)
+
+                clusters = ((encoded_data_full[c.medoid], c.members) for (i, c) in enumerate(cluster_generator))
+
+                # X (original matrix)
+                no_clusters = 0
+                intermediate_clusters = np.zeros(len(encoded_data_full),dtype=int)
+                medoids = []
+
+                for medoid, members in clusters:
+                    medoids.append(medoid)
+
+                    for member in members:
+                        contig_medoid_assignment[member] = medoid
+                        intermediate_clusters[member] = no_clusters
+                    no_clusters += 1
+                print(intermediate_clusters)
+
+                print(f'No. clusters: {no_clusters+1}')
+                np_medoids = np.array(medoids)
+
+
+                '''
+                encoded_batch = self.encode(batch).numpy()
+
+                kmeans = KMeans(n_clusters=3, random_state=0).fit(encoded_data_full)
+                batch_predictions = kmeans.predict(encoded_batch)
+                full_predictions = kmeans.predict(encoded_data_full)
+                centroids = kmeans.cluster_centers_
+
+                index_ = 0
+                truths = np.empty((batch_size, 2))
+
+                for centr in centroids:
+                    for q, j in enumerate(batch_predictions):
+                        if j == index_:
+                            truths[q] = centr
+                    index_ += 1
+
+                # TODO centroids er ikke punkter!
+                list_of_losses = self.autoencoder.train_on_batch(x=[batch], y=[batch, truths])
+                '''
+
+                truth_medoids = tf.gather(params=contig_medoid_assignment, indices=batch_indices)
+                # print(f'HVA SKER DER?!: {truth_medoids}')
+
+                list_of_losses = self.autoencoder.train_on_batch(x=[batch], y=[batch, truth_medoids])
+                # print(self.autoencoder.metrics_names)
+                # print(list_of_losses)
+
+                total_loss += list_of_losses[0]
+                reconstruct_loss += list_of_losses[1]
+                cluster_loss += list_of_losses[2]
+
+            # var = [(j, i) for j, i in sorted(zip(full_predictions, encoded_data_full), key=lambda pair: pair[0])]
+            # sorted_cluster_assignments_full = [i[0] for i in var]
+            # sorted_encodings = np.array([i[1] for i in var])
+
+            history_obj = list()
+            tot_avg = total_loss / amount_batches
+            history_obj.append(tot_avg)
+
+            recon_avg = reconstruct_loss / amount_batches
+            history_obj.append(recon_avg)
+
+            clust_avg = cluster_loss / amount_batches
+            history_obj.append(clust_avg)
+
+            print(f'Total loss: {tot_avg}, \t Reconst loss: {recon_avg}, \t Clust loss: {clust_avg}')
+
+            # embeddings(i + 1, labels=labels, assignments=full_predictions, medoids=centroids, encodings=encoded_data_full)
+
+            embeddings(i + 1, labels=labels, assignments=intermediate_clusters, medoids=np_medoids, encodings=encoded_data_full)
+            tensorboard.on_epoch_end(i + 1, named_logs(self.autoencoder, history_obj))
+
+        tensorboard.on_train_end(None)
+
+    def fit_iris_kmeans(self, x, y=None, batch_size=5, epochs=30):
+        labels = y
+
+        timestr = time.strftime("%Y%m%d-%H%M%S")
+        logdir = self.log_dir + '_IRIS_' + timestr
+        tensorboard = keras.callbacks.TensorBoard(
+            log_dir=logdir,
+            histogram_freq=0,
+            batch_size=batch_size,
+            write_graph=True,
+            write_grads=True
+        )
+
+        def plot_to_image(figure):
+            """Converts the matplotlib plot specified by 'figure' to a PNG image and
+            returns it. The supplied figure is closed and inaccessible after this call."""
+            # Save the plot to a PNG in memory.
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            # Closing the figure prevents it from being displayed directly inside
+            # the notebook.
+            plt.close(figure)
+            buf.seek(0)
+            # Convert PNG buffer to TF image
+            image = tf.image.decode_png(buf.getvalue(), channels=4)
+            # Add the batch dimension
+            image = tf.expand_dims(image, 0)
+            return image
+
+        def embeddings(epoch, labels, assignments, medoids, encodings):
+            file_write_embeddings = tf.summary.create_file_writer(logdir + 'embeddings')
+            # TODO we do not have to encode here. THe clustering part encodes all data at each batch. could be shared
+            encoded_data = encodings
+
+            figure = plt.figure(figsize=(12, 12))
+            plt.title("Embeddings")
+            axes = plt.gca()
+            axes.set_xlim([-1.5, 1.5])
+            axes.set_ylim([-1.5, 1.5])
+            X = encoded_data
+
+            colors = np.array(list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
+                                          int(max(labels) + 1))))
+            plt.scatter(X[:, 0], X[:, 1], s=12, color=colors[labels])
+
+
+            image = plot_to_image(figure)
+            with file_write_embeddings.as_default():
+                tf.summary.image("Embeddings", image, step=epoch)
+
+
+
+            '''Save cluster embeddings'''
+            file_write_embeddings = tf.summary.create_file_writer(logdir + 'cluster_embeddings')
+            # TODO we do not have to encode here. THe clustering part encodes all data at each batch. could be shared
+            #encoded_data = self.encoder.predict(x=x)
+            # embedded = TSNE(n_components=2).fit_transform(encoded_data)
+            figure = plt.figure(figsize=(12, 12))
+            plt.title("Cluster_embeddings")
+            axes = plt.gca()
+            axes.set_xlim([-1.5,1.5])
+            axes.set_ylim([-1.5, 1.5])
+            # x = encoded_data[:, 0]
+            # y = encoded_data[:, 1]
+            X = encoded_data
+            # farvelade ---------------------------
+            medoid_labels = [i for i, c in enumerate(medoids)]
+
+            colors = np.array(
+                list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
+                            int(max(medoid_labels) + 1))))
+            plt.scatter(medoids[:, 0], medoids[:, 1], s=600, color=colors[medoid_labels], marker=".")
+
+
+            # plt.scatter(x, y, s=2, cmap=plt.cm.get_cmap("jet", 256))
+
+            colors = np.array(
+                list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
+                            int(max(assignments) + 1))))
+            plt.scatter(X[:, 0], X[:, 1], s=50, color=colors[assignments], marker="x")
+
+
+            image = plot_to_image(figure)
+            with file_write_embeddings.as_default():
+                tf.summary.image("Cluster_Embeddings", image, step=epoch)
+
+
+
+
+
+        data = np.copy(x)
+        indices = np.arange(len(data))
+
+        no_batches = len(x) / batch_size
+
+        # 1. get appropriate batch
+
+        '''Next 15 lines regarding tensorboard and callbacks are from Stack overflow user: "erenon"
+           https://stackoverflow.com/questions/44861149/keras-use-tensorboard-with-train-on-batch'''
+        # create tf callback
+
+        # embeddings_callback = keras.callbacks.LambdaCallback(on_epoch_end=tsne_embeddings)
+        tensorboard.set_model(self.autoencoder)
+
+        # Transform train_on_batch return value
+        # to dict expected by on_batch_end callback
+        def named_logs(model, logs):
+            result = {}
+            for l in zip(model.metrics_names, logs):
+                result[l[0]] = l[1]
+            return result
+
+        for i in range(epochs):
+
+
+            np.random.RandomState(i).shuffle(data)
+            np.random.RandomState(i).shuffle(indices)
+            np.random.RandomState(i).shuffle(y)
+            batches = np.array_split(data, no_batches)
+            batch_indices_list = np.array_split(indices, no_batches)
+            amount_batches = len(batches)
+
+            print(f'Current epoch: {i + 1} of total epochs: {epochs}')
+            total_loss = 0
+            reconstruct_loss = 0
+            cluster_loss = 0
+            for batch_no, batch in enumerate(batches):
+                batch_indices = batch_indices_list[batch_no]
+                #print(f'Current batch: {batch_no + 1} of total batches: {amount_batches}')
+
+                # 2. encode all data
+                encoded_data_full = self.encode(data).numpy()
+
+                # 3. cluster
+                '''
+                assigned_medoids_per_contig = np.zeros(encoded_data_full.shape)
+
+                # Kan gøres bedre, assigne mens, clusters bliver lavet
+                
                 cluster_generator = vamb_clust.cluster(encoded_data_full)
 
                 clusters = ((encoded_data_full[c.medoid], c.members) for (i, c) in enumerate(cluster_generator))
@@ -474,10 +794,36 @@ class Badass_Binner(Binner):
                 print(f'No. clusters: {no_clusters}')
                 np_medoids = np.array(medoids)
 
+                
+                '''
+                encoded_batch = self.encode(batch).numpy()
 
-                truth_medoids = tf.gather(params=assigned_medoids_per_contig, indices=batch_indices)
+                kmeans = KMeans(n_clusters=3, random_state=0).fit(encoded_data_full)
+                batch_predictions = kmeans.predict(encoded_batch)
+                full_predictions = kmeans.predict(encoded_data_full)
+                centroids = kmeans.cluster_centers_
 
-                list_of_losses = self.autoencoder.train_on_batch(x=[batch], y=[batch, truth_medoids])
+                index_ = 0
+                truths = np.empty((batch_size, 2))
+
+
+                for centr in centroids:
+                    for q, j in enumerate(batch_predictions):
+                        if j == index_:
+                            truths[q] = centr
+                    index_ += 1
+
+                #TODO centroids er ikke punkter!
+                list_of_losses = self.autoencoder.train_on_batch(x=[batch], y=[batch, truths])
+
+
+
+
+
+                #truth_medoids = tf.gather(params=assigned_medoids_per_contig, indices=batch_indices)
+                #print(f'HVA SKER DER?!: {truth_medoids}')
+
+                #list_of_losses = self.autoencoder.train_on_batch(x=[batch], y=[batch, truth_medoids])
                 # print(self.autoencoder.metrics_names)
                 # print(list_of_losses)
 
@@ -485,8 +831,9 @@ class Badass_Binner(Binner):
                 reconstruct_loss += list_of_losses[1]
                 cluster_loss += list_of_losses[2]
 
-
-
+            #var = [(j, i) for j, i in sorted(zip(full_predictions, encoded_data_full), key=lambda pair: pair[0])]
+            #sorted_cluster_assignments_full = [i[0] for i in var]
+            #sorted_encodings = np.array([i[1] for i in var])
 
             history_obj = list()
             tot_avg = total_loss / amount_batches
@@ -500,9 +847,8 @@ class Badass_Binner(Binner):
 
             print(f'Total loss: {tot_avg}, \t Reconst loss: {recon_avg}, \t Clust loss: {clust_avg}')
 
-
-
-            embeddings(i + 1, labels=labels, assignments=intermediate_clusters, medoids=np_medoids)
+            embeddings(i + 1, labels=labels, assignments=full_predictions, medoids=centroids, encodings=encoded_data_full)
+            #embeddings(i + 1, labels=labels, assignments=intermediate_clusters, medoids=np_medoids)
             tensorboard.on_epoch_end(i + 1, named_logs(self.autoencoder, history_obj))
 
         tensorboard.on_train_end(None)
@@ -623,23 +969,22 @@ class Badass_Binner(Binner):
             image = tf.expand_dims(image, 0)
             return image
 
-        def tsne_embeddings(epoch, logs=None):
+        def tsne_embeddings(epoch, encoded_data, logs=None):
             file_write_embeddings = tf.summary.create_file_writer(logdir + 'embeddings')
-            encoded_data = self.encoder.predict(x=self.feature_matrix)
+            #encoded_data = self.encoder.predict(x=self.feature_matrix)
             embedded = TSNE(n_components=2).fit_transform(encoded_data)
-            figure = plt.figure(figsize=(8, 8))
+            figure = plt.figure(figsize=(10, 10))
             plt.title("Embeddings")
-            x = embedded[:, 0]
-            y = embedded[:, 1]
-            plt.scatter(x, y, s=2, cmap=plt.cm.get_cmap("jet", 256))
-            plt.colorbar(ticks=range(256))
-            plt.clim(-0.5, 9.5)
+
+            plt.scatter(embedded[:, 0], embedded[:, 1], s=50)
+
             image = plot_to_image(figure)
             with file_write_embeddings.as_default():
                 tf.summary.image("Embeddings", image, step=epoch)
 
 
         data = np.copy(x)
+        indices = np.arange(len(data))
 
         no_batches = len(x)/batch_size
 
@@ -663,7 +1008,6 @@ class Badass_Binner(Binner):
 
         for i in range(epochs):
 
-            indices = np.arange(len(data))
             np.random.RandomState(i).shuffle(data)
             np.random.RandomState(i).shuffle(indices)
             batches = np.array_split(data, no_batches)
@@ -721,7 +1065,7 @@ class Badass_Binner(Binner):
 
             print(f'Total loss: {tot_avg}, \t Reconst loss: {recon_avg}, \t Clust loss: {clust_avg}')
 
-            tsne_embeddings(i+1)
+            tsne_embeddings(i+1, encoded_data_full)
             tensorboard.on_epoch_end(i+1, named_logs(self.autoencoder, history_obj))
 
         tensorboard.on_train_end(None)

@@ -6,9 +6,9 @@ from math import ceil as _ceil
 import vamb.vambtools as _vambtools
 import torchvision
 import tensorflow as tf
-_DEFAULT_RADIUS = 0.06
+_DEFAULT_RADIUS = 0.06 # a.k.a default threshold
 # Distance within which to search for medoid point
-_MEDOID_RADIUS = 0.05
+_MEDOID_RADIUS = 0.5 # original 0.05
 
 _DELTA_X = 0.005
 _XMAX = 0.3
@@ -130,15 +130,16 @@ class ClusterGenerator:
         return histogram, kept_mask
 
     def __init__(self, matrix, maxsteps=25, windowsize=200, minsuccesses=20, destroy=False,
-                normalized=False, cuda=False):
+                normalized=False, cuda=True):
         self._check_params(matrix, maxsteps, windowsize, minsuccesses)
         if not destroy:
             matrix = matrix.copy()
 
         # Shuffle matrix in unison to prevent seed sampling bias. Indices keeps
         # track of which points are which.
-        _np.random.RandomState(0).shuffle(matrix)
-        indices = _np.random.RandomState(0).permutation(len(matrix))
+        #_np.random.RandomState(0).shuffle(matrix)
+        #indices = _np.random.RandomState(0).permutation(len(matrix))
+        indices = _np.arange(len(matrix))
         indices = _torch.from_numpy(indices)
         matrix = _torch.from_numpy(matrix)
 
@@ -241,7 +242,7 @@ class ClusterGenerator:
                     self.attempts.clear()
                     self.successes = 0
 
-        print(threshold)
+        #print(threshold)
         # These are the points of the final cluster AFTER establishing the threshold used
         points = _smaller_indices(distances, self.kept_mask, threshold, self.CUDA)
         isdefault = success is None and threshold == _DEFAULT_RADIUS and self.peak_valley_ratio > 0.55
@@ -435,7 +436,7 @@ def _wander_medoid(matrix, kept_mask, medoid, max_attempts, rng, cuda):
     return medoid, distances
 
 def cluster(matrix, maxsteps=25, windowsize=200, minsuccesses=20, destroy=False,
-            normalized=False, cuda=False):
+            normalized=False, cuda=True):
     return ClusterGenerator(matrix, maxsteps, windowsize, minsuccesses, destroy, normalized, cuda)
 
 def write_clusters(filehandle, clusters, max_clusters=None, min_size=1,

@@ -11,14 +11,24 @@ from pathlib import Path
 
 
 def main():
-    '''Simon GPU fix'''
+    '''Simon GPU fix
     physical_devices = tf.config.list_physical_devices('GPU')
     try:
         tf.config.experimental.set_memory_growth(physical_devices[0], True)
     except:
         # Invalid device or cannot modify virtual devices once initialized.
         pass
+    '''
 
+    ''' DETTE SKULLE GERNE LÆSE DATA FRA CAMI BINS OG ARRANGE DATA ???????????
+    print("Getting true bins")
+    true_bins, contig_ids_true, contig_to_bin_id = data_processor.get_unique_ids_truth(
+        'D:/Downloads/out/gsa_mapping.binning')
+
+    true_bins = data_processor.sort_bins_follow_input(contig_ids, contig_to_bin_id)
+
+    print("Starting binning process")
+    '''
 
     args = handle_input_arguments()
     print(args)
