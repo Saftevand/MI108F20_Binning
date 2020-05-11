@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 import clustering_methods
+from tensorboard import program
 from pathlib import Path
 
 
@@ -20,17 +21,19 @@ def main():
         pass
     '''
 
-    ''' DETTE SKULLE GERNE LÆSE DATA FRA CAMI BINS OG ARRANGE DATA ???????????
+    # DETTE SKULLE GERNE LÆSE DATA FRA CAMI BINS OG ARRANGE DATA ???????????
     print("Getting true bins")
-    true_bins, contig_ids_true, contig_to_bin_id = data_processor.get_unique_ids_truth(
-        'D:/Downloads/out/gsa_mapping.binning')
+    true_bins, contig_ids_true, contig_to_bin_id = data_processor.get_cami_data_truth(
+        '/mnt/cami_high/gsa_mapping_pool.binning')
 
-    true_bins = data_processor.sort_bins_follow_input(contig_ids, contig_to_bin_id)
-
+    labels = data_processor.sort_bins_follow_input(contig_ids_true, contig_to_bin_id)
+    print(f'True bins:  {true_bins[:100]}')
     print("Starting binning process")
-    '''
 
     args = handle_input_arguments()
+    tb = program.TensorBoard()
+    tb.configure(argv=[None, '--logdir', args.outdir, '--host', '0.0.0.0', '--port', '23543'])
+    url = tb.launch()
     print(args)
     #   TODO    calc methyl
 
@@ -43,11 +46,9 @@ def main():
 
     binner_instance = binner.create_binner(split_value=0.8, clustering_method=args.clustering,
                                            binner_type=args.binnertype, feature_matrix=feature_matrix,
-                                           contig_ids=contig_ids, log_dir=args.outdir)
+                                           contig_ids=contig_ids, log_dir=args.outdir, labels=labels)
 
-
-
-    binner_instance.do_iris_binning()
+    binner_instance.do_binning()
 
     results = binner_instance.get_assignments()
 
