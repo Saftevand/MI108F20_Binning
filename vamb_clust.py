@@ -8,10 +8,10 @@ import torchvision
 import tensorflow as tf
 _DEFAULT_RADIUS = 0.06 # a.k.a default threshold
 # Distance within which to search for medoid point
-_MEDOID_RADIUS = 0.5 # original 0.05... ofte brugt af os: 0.5 .... 1.5 har været god
+_MEDOID_RADIUS = 0.5 # original 0.05
 
-_DELTA_X = 0.005 #orig: 0.005
-_XMAX = 0.3 #orig: 0.3
+_DELTA_X = 0.005
+_XMAX = 0.3
 #
 # This is the PDF of normal with µ=0, s=0.01 from -0.075 to 0.075 with intervals
 # of DELTA_X, for a total of 31 values. We multiply by _DELTA_X so the density
@@ -302,14 +302,13 @@ def _find_threshold(histogram, peak_valley_ratio, cuda):
             peak_density = density
 
         # Peak is over when density drops below 60% of peak density
-        # original value : 0.6
-        if not peak_over and density < 0.7 * peak_density:
+        if not peak_over and density < 0.6 * peak_density:
             peak_over = True
             density_at_minimum = density
 
         # If another peak is detected, we stop
-        #if peak_over and density > 1.5 * density_at_minimum:
-        #    break
+        if peak_over and density > 1.5 * density_at_minimum:
+            break
 
         # Now find the minimum after the peak
         if peak_over and density < density_at_minimum:

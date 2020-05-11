@@ -158,58 +158,32 @@ class Badass_Binner(Binner):
         self.bins = self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix))
         return self.bins
 
-    def generate_noise(self, dataset, n_noise, label_nr):
-        (n, dims) = dataset.shape
-        noise = np.empty([n_noise])
-
-        for i in range(dims - 1):
-            col = dataset[:, i]
-            minval = min(col)
-            maxval = max(col)
-            noise_dim = np.random.uniform(minval, maxval, n_noise)
-            noise = np.vstack([noise, noise_dim])
-
-        trans_noise = np.transpose(noise)
-        dummy_labels = [label_nr for _ in range(n_noise)]
-        return trans_noise, dummy_labels
-
     def do_iris_binning(self):
-        #data = datasets.load_iris()
-        data = datasets.load_wine()
-        X = data.data
+        iris = datasets.load_iris()
+        X = iris.data
 
-        # noise generator er i stykker
-        #noise, dummy_labels = self.generate_noise(X, 50, 3)
-
-        '''
         #gen noise
         dim1 = np.random.uniform(3., 8., 50)
         dim2 = np.random.uniform(1., 5., 50)
         dim3 = np.random.uniform(0., 6., 50)
         dim4 = np.random.uniform(-1., 4, 50)
-        
-        noise = np.stack([dim1, dim2, dim3, dim4], axis=1)
-        '''
-        #X = np.vstack((X, noise))
 
+        noise = np.stack([dim1, dim2, dim3, dim4], axis=1)
+        X = np.vstack((X, noise))
 
         scaler = preprocessing.MinMaxScaler()
         scaler.fit(X)
         X = scaler.transform(X)
 
-        y = data.target
+        y = iris.target
 
-        # noise labels
-        #y = np.append(y, dummy_labels)
+        y = np.append(y,[3 for _ in range(50)])
 
-
-        #wine : [10, 4, 2]
-        #IRIS : [4,4,2]
-        # TODO lige nu er det bygget til toy data. --> kører ned til 2 dims -->  ingen tSNE
-        self.build_pretraining_model([4,4,2], toy_data=True, toy_dims=4, learning_rate=0.001) #default adam = 0.001
-        self.pretrain(X, y, batch_size=20, epochs=200, validation_split=0.2, shuffle=True)
-        self.include_clustering_loss(learning_rate=0.001, loss_weights=[1, 0.05])
-        self.fit_iris(x=X, y=y, batch_size=20, epochs=20, cuda=False)
+        # TODO lige nu er det bygget til iris data. --> kører ned til 2 dims -->  ingen tSNE
+        self.build_pretraining_model([4,10, 2], True, 4, learning_rate=0.0001) #default adam = 0.001
+        self.pretrain(X, y, batch_size=10, epochs=200, validation_split=0.2, shuffle=True)
+        self.include_clustering_loss(learning_rate=0.0001, loss_weights=[0.5, 0.5])
+        self.fit_iris(x=X, y=y, batch_size=20, epochs=5, cuda=False)
 
 
         #self.bins = self.clustering_method.do_clustering(self.encoder.predict(X))
@@ -315,8 +289,8 @@ class Badass_Binner(Binner):
             figure = plt.figure(figsize=(10, 10))
             plt.title("Pretrain_embeddings")
             axes = plt.gca()
-            #axes.set_xlim([-1.5, 1.5])
-            #axes.set_ylim([-1.5, 1.5])
+            axes.set_xlim([-1.5, 1.5])
+            axes.set_ylim([-1.5, 1.5])
             # x = encoded_data[:, 0]
             # y = encoded_data[:, 1]
             # farvelade ---------------------------
@@ -396,8 +370,8 @@ class Badass_Binner(Binner):
             figure = plt.figure(figsize=(10, 10))
             plt.title("Embeddings")
             axes = plt.gca()
-            #axes.set_xlim([-1.5, 1.5])
-            #axes.set_ylim([-1.5, 1.5])
+            axes.set_xlim([-1.5, 1.5])
+            axes.set_ylim([-1.5, 1.5])
             X = encoded_data
 
             colors = np.array(
@@ -425,9 +399,9 @@ class Badass_Binner(Binner):
             trd_cluster = counter[2][0]
             print(f'Largest cluster ID : {most_common_cluster}')
 
-            #print(assignments)
-            #print(most_common_cluster)
-            #print(medoids)
+            print(assignments)
+            print(most_common_cluster)
+            print(medoids)
 
             mask = np.ones(len(medoids), dtype=bool)
             mask[most_common_cluster] = False
@@ -484,8 +458,8 @@ class Badass_Binner(Binner):
             figure = plt.figure(figsize=(10, 10))
             plt.title("Cluster_embeddings")
             axes = plt.gca()
-            #axes.set_xlim([-1.5, 1.5])
-            #axes.set_ylim([-1.5, 1.5])
+            axes.set_xlim([-1.5, 1.5])
+            axes.set_ylim([-1.5, 1.5])
             # x = encoded_data[:, 0]
             # y = encoded_data[:, 1]
             X = encoded_data
@@ -494,12 +468,12 @@ class Badass_Binner(Binner):
             medoid_labels = [i for i, c in enumerate(medoids)]
 
             colors = np.array(list(islice(cycle(['black']), len(medoids))))
-            #print(colors)
-            #print(medoids)
-            #print(f'X: {X[0]}')
-            #x,y = medoids[:, 0], medoids[:, 1]
-            #print(x)
-            #print(y)
+            print(colors)
+            print(medoids)
+            print(f'X: {X[0]}')
+            x,y = medoids[:, 0], medoids[:, 1]
+            print(x)
+            print(y)
 
             plt.scatter(medoids_small_clusters[:, 0], medoids_small_clusters[:, 1], s=600, color='black', marker=".")
             plt.scatter(small_clusters[:, 0], small_clusters[:, 1], s=50, color='darkorange', marker="x")
@@ -595,17 +569,13 @@ class Badass_Binner(Binner):
                 medoids = []
 
                 for medoid, members in clusters:
-
-                    mems = tf.gather(params=encoded_data_full ,indices=members)
-                    centroid = np.mean(mems, axis=0)
-                    medoids.append(centroid) # normally the medoid
-                    #print(f'centroid: {centroid}')
+                    medoids.append(medoid)
 
                     for member in members:
-                        contig_medoid_assignment[member] = centroid # medoid
+                        contig_medoid_assignment[member] = medoid
                         intermediate_clusters[member] = no_clusters
                     no_clusters += 1
-                #print(intermediate_clusters)
+                print(intermediate_clusters)
 
                 print(f'No. clusters: {no_clusters+1}')
                 np_medoids = np.array(medoids)
@@ -703,8 +673,8 @@ class Badass_Binner(Binner):
             figure = plt.figure(figsize=(12, 12))
             plt.title("Embeddings")
             axes = plt.gca()
-            #axes.set_xlim([-1.5, 1.5])
-            #axes.set_ylim([-1.5, 1.5])
+            axes.set_xlim([-1.5, 1.5])
+            axes.set_ylim([-1.5, 1.5])
             X = encoded_data
 
             colors = np.array(list(islice(cycle(['blue', 'red', 'limegreen', 'turquoise', 'darkorange', 'magenta', 'black', 'brown']),
@@ -726,8 +696,8 @@ class Badass_Binner(Binner):
             figure = plt.figure(figsize=(12, 12))
             plt.title("Cluster_embeddings")
             axes = plt.gca()
-            #axes.set_xlim([-1.5,1.5])
-            #axes.set_ylim([-1.5, 1.5])
+            axes.set_xlim([-1.5,1.5])
+            axes.set_ylim([-1.5, 1.5])
             # x = encoded_data[:, 0]
             # y = encoded_data[:, 1]
             X = encoded_data
