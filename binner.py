@@ -155,9 +155,9 @@ class Badass_Binner(Binner):
 
     def do_binning(self):
         self.build_pretraining_model([100, 100, 200, 32 ], False, 4, learning_rate=0.001)  # default adam = 0.001
-        self.pretrain(self.feature_matrix, self.labels, batch_size=32, epochs=2, validation_split=0.2, shuffle=True)
+        self.pretrain(self.feature_matrix, self.labels, batch_size=32, epochs=1, validation_split=0.2, shuffle=True)
         self.include_clustering_loss(learning_rate=0.0001, loss_weights=[1, 0.05])
-        self.fit(self.x_train, y=self.labels)
+        self.fit(self.feature_matrix, y=self.labels, batch_size=10000, epochs=1, cuda=True)
         self.bins = self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix))
         return self.bins
 
@@ -967,7 +967,7 @@ class Badass_Binner(Binner):
     def decode(self, input):
         return self.decoder(input)
 
-    def fit(self, x, y=None, batch_size=4000, epochs=10):
+    def fit(self, x, y=None, batch_size=4000, epochs=10, cuda=True):
 
         tensorboard = keras.callbacks.TensorBoard(
             log_dir=self.log_dir,
@@ -1026,7 +1026,7 @@ class Badass_Binner(Binner):
                 assignments = np.zeros(len(encoded_data_full))
                 # Kan gøres bedre, assigne mens, clusters bliver lavet
 
-                cluster_generator = vamb_clust.cluster(encoded_data_full)
+                cluster_generator = vamb_clust.cluster(encoded_data_full, cuda=cuda)
 
                 clusters = ((encoded_data_full[c.medoid], c.members) for (i, c) in enumerate(cluster_generator))
                 centroids = []

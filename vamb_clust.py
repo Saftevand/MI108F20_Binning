@@ -307,8 +307,8 @@ def _find_threshold(histogram, peak_valley_ratio, cuda):
             density_at_minimum = density
 
         # If another peak is detected, we stop
-        #if peak_over and density > 1.5 * density_at_minimum:
-        #    break
+        if peak_over and density > 1.5 * density_at_minimum:
+            break
 
         # Now find the minimum after the peak
         if peak_over and density < density_at_minimum:
