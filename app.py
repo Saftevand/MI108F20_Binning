@@ -32,7 +32,7 @@ def main():
 
     args = handle_input_arguments()
     tb = program.TensorBoard()
-    tb.configure(argv=[None, '--logdir', args.outdir, '--host', '0.0.0.0', '--port', '23543'])
+    tb.configure(argv=[None, '--logdir', args.outdir, '--host', '0.0.0.0', '--port', '13337'])
     url = tb.launch()
     print(args)
     #   TODO    calc methyl
@@ -48,7 +48,7 @@ def main():
                                            binner_type=args.binnertype, feature_matrix=feature_matrix,
                                            contig_ids=contig_ids, log_dir=args.outdir, labels=labels)
 
-    binner_instance.do_binning()
+    binner_instance.do_binning(load_model=True)
 
     results = binner_instance.get_assignments()
 
@@ -57,6 +57,7 @@ def main():
     print(feature_matrix.mean())
     print(f'{feature_matrix.max()} : max')
     print(f'{feature_matrix.min()} : min')
+
 
 
 def handle_input_arguments():
@@ -95,6 +96,7 @@ def handle_input_arguments():
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
 
     return args
+
 
 
 if __name__ == '__main__':

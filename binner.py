@@ -6,18 +6,23 @@ from tensorflow import keras
 import numpy as np
 from clustering_layer_xifeng import ClusteringLayer
 from sklearn.cluster import KMeans
+import sklearn
 from sklearn import datasets, preprocessing
 import time
 import matplotlib.pyplot as plt
 import cudf
 import io
 from cuml import TSNE
+from cuml.cluster import DBSCAN
 import sys
 import vamb_clust
 from itertools import cycle, islice
 import os
 from collections import Counter
 from tensorboard.plugins import projector
+from collections import Counter
+
+import torch
 
 
 
@@ -153,12 +158,63 @@ class Badass_Binner(Binner):
         self.log_dir = log_dir + time.strftime("%Y%m%d-%H%M%S")
         self.encoding_size = 0
 
-    def do_binning(self):
-        self.build_pretraining_model([100, 100, 200, 32 ], False, 4, learning_rate=0.001)  # default adam = 0.001
-        self.pretrain(self.feature_matrix, self.labels, batch_size=32, epochs=1, validation_split=0.2, shuffle=True)
+    def save_autoencoder(self):
+        model_json = self.autoencoder.to_json()
+        with open("autoencoder.json", "w") as json_file:
+            json_file.write(model_json)
+        # serialize weights to HDF5
+        self.autoencoder.save_weights("autoencoder.h5")
+
+        print("Saved autoencoder")
+
+    def extract_encoder(self):
+        input = self.autoencoder.get_layer('input').output
+        latent_output = self.autoencoder.get_layer('latent_layer').output
+        self.encoder = keras.Model(input, latent_output, name="encoder")
+        print(self.encoder.summary())
+
+    def load_autoencoder(self):
+        json_file = open('autoencoder.json', 'r')
+        loaded_model_json = json_file.read()
+        json_file.close()
+        loaded_model = keras.models.model_from_json(loaded_model_json)
+        # load weights into new model
+        loaded_model.load_weights("autoencoder.h5")
+        self.autoencoder = loaded_model
+        print("Loaded autoencoder")
+
+
+    def do_binning(self, load_model=False):
+        if not load_model:
+            self.build_pretraining_model([100, 100, 200, 32], False, 4, learning_rate=0.001)  # default adam = 0.001
+            self.pretrain(self.feature_matrix, self.labels, batch_size=128, epochs=400, validation_split=0.2, shuffle=True)
+            self.extract_encoder()
+            self.save_autoencoder()
+        else:
+            self.load_autoencoder()
+            self.extract_encoder()
+
+        '''
+        encoded = self.encode(self.feature_matrix)
+
+        fuck= torch.tensor(encoded.numpy())
+
+        first = time.strftime('%H:%M:%S')
+        print(first)
+
+        for i in range(18000):
+            vamb_clust._calc_distances_euclidean(fuck, 2)
+
+        snd = time.strftime('%H:%M:%S')
+
+
+        print(snd)
+        '''
+
         self.include_clustering_loss(learning_rate=0.0001, loss_weights=[1, 0.05])
-        self.fit(self.feature_matrix, y=self.labels, batch_size=10000, epochs=1, cuda=True)
-        self.bins = self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix))
+        self.fit_dbscan(self.feature_matrix, y=self.labels, batch_size=4000, epochs=1, cuda=True)
+        #self.bins = self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix))
+
         return self.bins
 
     def do_iris_binning(self):
@@ -217,11 +273,10 @@ class Badass_Binner(Binner):
             self.autoencoder.compile(optimizer=opt, loss='mse')
 
             print(self.autoencoder.summary())
-            print(self.encoder.summary())
             return
 
         # Encoder
-        encoder_input = keras.layers.Input(shape=(input_shape,), name="non_sequential")
+        encoder_input = keras.layers.Input(shape=(input_shape,), name="input")
         enc = encoder_input
 
         # This layer? should we have it?
@@ -237,7 +292,7 @@ class Badass_Binner(Binner):
         out = keras.layers.Dense(layers[-1], kernel_initializer=init, name='latent_layer')(enc)
 
         # create encoder
-        encoder = keras.Model(encoder_input, out, name="encoder")
+        #encoder = keras.Model(encoder_input, out, name="encoder")
 
         # first layer of decoder outside loop - we need to get hold of encoder_output to define encoder and extra output
         layers.reverse()
@@ -254,7 +309,7 @@ class Badass_Binner(Binner):
 
         autoencoder = keras.Model(inputs=encoder_input, outputs=decoder_output, name="autoencoder")
 
-        self.encoder = encoder
+        #self.encoder = encoder
         self.autoencoder = autoencoder
 
         opt = keras.optimizers.Adam(learning_rate=learning_rate)
@@ -263,7 +318,6 @@ class Badass_Binner(Binner):
         self.autoencoder.compile(optimizer=opt, loss='mse')
 
         print(self.autoencoder.summary())
-        print(self.encoder.summary())
 
     def pretrain(self, x, y, batch_size=30, epochs=60, validation_split=0.2, shuffle=True):
         log_dir = f'{self.log_dir}_pretraining_{time.strftime("%Y%m%d-%H%M%S")}'
@@ -292,8 +346,8 @@ class Badass_Binner(Binner):
             figure = plt.figure(figsize=(10, 10))
             plt.title("Pretrain_embeddings")
             axes = plt.gca()
-            axes.set_xlim([-1.5, 1.5])
-            axes.set_ylim([-1.5, 1.5])
+            #axes.set_xlim([-1.5, 1.5])
+            #axes.set_ylim([-1.5, 1.5])
             # x = encoded_data[:, 0]
             # y = encoded_data[:, 1]
             # farvelade ---------------------------
@@ -309,16 +363,19 @@ class Badass_Binner(Binner):
 
         tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 
+        # todo #info# Embedding callback not used!
         # begin pretraining
         self.history = self.autoencoder.fit(x, x, batch_size=batch_size, epochs=epochs,
                                             validation_split=validation_split, shuffle=shuffle,
-                                            callbacks=[tensorboard_callback, embedding_callback])
+                                            callbacks=[tensorboard_callback])
         #np.save('latent_representation', self.encode(self.feature_matrix))
 
     def include_clustering_loss(self, learning_rate=0.001, loss_weights=[0.5, 0.5]):
         output_of_input = self.autoencoder.layers[0].output
         decoder_output = self.autoencoder.layers[-1].output
         latent_output = self.autoencoder.get_layer('latent_layer').output
+
+
 
         rerouted_autoencoder = keras.Model(inputs=[output_of_input], outputs=[decoder_output, latent_output],
                                            name='2outs_autoencoder')
@@ -1050,6 +1107,7 @@ class Badass_Binner(Binner):
                 total_loss += list_of_losses[0]
                 reconstruct_loss += list_of_losses[1]
                 cluster_loss += list_of_losses[2]
+                print(vamb_clust.VAMB_POO)
 
             history_obj = list()
             tot_avg = total_loss / amount_batches
@@ -1069,6 +1127,184 @@ class Badass_Binner(Binner):
         self.embeddings_projector(epoch=i+1, labels=labels, assignments=assignments, medoids=centroids,
                                   encodings=encoded_data_full)
         tensorboard.on_train_end(None)
+
+    def fit_dbscan(self, x, y=None, batch_size=4000, epochs=10, cuda=True):
+
+        tensorboard = keras.callbacks.TensorBoard(
+            log_dir=self.log_dir,
+            histogram_freq=0,
+            batch_size=batch_size,
+            write_graph=True,
+            write_grads=True
+        )
+
+        data = np.copy(x)
+        labels = y
+        indices = np.arange(len(data))
+
+        no_batches = len(x)/batch_size
+
+        # 1. get appropriate batch
+
+
+        '''Next 15 lines regarding tensorboard and callbacks are from Stack overflow user: "erenon"
+           https://stackoverflow.com/questions/44861149/keras-use-tensorboard-with-train-on-batch'''
+        # create tf callback
+
+        #embeddings_callback = keras.callbacks.LambdaCallback(on_epoch_end=tsne_embeddings)
+        tensorboard.set_model(self.autoencoder)
+
+        # Transform train_on_batch return value
+        # to dict expected by on_batch_end callback
+        def named_logs(model, logs):
+            result = {}
+            for l in zip(model.metrics_names, logs):
+                result[l[0]] = l[1]
+            return result
+
+        for i in range(epochs):
+
+            np.random.RandomState(i).shuffle(data)
+            np.random.RandomState(i).shuffle(indices)
+            np.random.RandomState(i).shuffle(labels)
+            batches = np.array_split(data, no_batches)
+            batch_indices_list = np.array_split(indices, no_batches)
+            amount_batches = len(batches)
+
+            print(f'Current epoch: {i+1} of total epochs: {epochs}')
+            total_loss = 0
+            reconstruct_loss = 0
+            cluster_loss = 0
+            for batch_no, batch in enumerate(batches):
+                batch_indices = batch_indices_list[batch_no]
+                print(f'Current batch: {batch_no+1} of total batches: {amount_batches}')
+
+                # 2. encode all data
+                encoded_data_full = self.encode(data).numpy()
+
+                # 3. cluster
+                assigned_medoids_per_contig = np.zeros(encoded_data_full.shape)
+                assignments = np.zeros(len(encoded_data_full))
+                first = time.strftime('%H:%M:%S')
+                print(first)
+
+                dbscan_instance = sklearn.cluster.DBSCAN(eps=0.5, min_samples=10)
+
+                # dbscan_instance.fit(encoded_data_full)
+                dbscan_instance.fit(encoded_data_full)
+
+                # Todo this should be np array
+                all_assignments = np.array(dbscan_instance.labels_)
+
+                #mask = np.zeros(len(encoded_data_full), dtype=bool)
+                #mask[batch_indices_list] = True
+                batch_assignments = np.empty(len(batch_indices))
+                for count, q in enumerate(batch_indices):
+                    batch_assignments[count] = all_assignments[q]
+                # batch_assignments = tf.gather(params=all_assignments, indices=batch_indices)
+
+
+                batch_centroids = []
+
+                set_batch_assignments = set(batch_assignments)
+                centroid_dict = {}
+                '''
+                for cluster_label in set_batch_assignments:
+                    cluster_mask = (all_assignments == cluster_label)
+                    encoded_cluster = encoded_data_full[cluster_mask]
+                    centroid = np.mean(encoded_cluster, axis=0)
+                    centroid_dict[cluster_label] = centroid
+
+                for cluster_label in batch_assignments:
+                    batch_centroids.append(centroid_dict[cluster_label])
+                '''
+
+                for cluster_label in set(all_assignments):
+                    # if outlier
+                    if cluster_label == -1:
+                        continue
+
+                    cluster_mask = (all_assignments == cluster_label)
+                    encoded_cluster = encoded_data_full[cluster_mask]
+                    centroid = np.mean(encoded_cluster, axis=0)
+                    centroid_dict[cluster_label] = centroid
+
+
+                centroids = np.vstack(list(centroid_dict.values()))
+
+                for index, cluster_label in zip(batch_indices, batch_assignments):
+                    if cluster_label == -1:
+                        dists = np.sqrt(np.sum(((centroids - encoded_data_full[index]) ** 2), axis=1))
+                        shortest_dist = np.argmin(dists)
+                        batch_centroids.append(centroid_dict[shortest_dist])
+                        all_assignments[index] = shortest_dist
+                    else:
+                        batch_centroids.append(centroid_dict[cluster_label])
+
+                first = time.strftime('%H:%M:%S')
+                print(first)
+
+
+
+
+
+                '''
+                # Kan gøres bedre, assigne mens, clusters bliver lavet
+
+                cluster_generator = vamb_clust.cluster(encoded_data_full, cuda=cuda)
+
+                clusters = ((encoded_data_full[c.medoid], c.members) for (i, c) in enumerate(cluster_generator))
+                centroids = []
+                no_clusters = 0
+                for medoid, members in clusters:
+                    centroid = np.mean(tf.gather(params=encoded_data_full, indices=members), axis=0)
+                    centroids.append(centroid)
+                    for member in members:
+                        assigned_medoids_per_contig[member] = centroid
+                        assignments[member] = no_clusters
+                    no_clusters += 1
+                '''
+                print(Counter(all_assignments))
+                no_clusters = max(all_assignments)
+                print(f'No. clusters: {no_clusters}')
+
+                #truth_medoids = tf.gather(params=assigned_medoids_per_contig, indices=batch_indices)
+
+                list_of_losses = self.autoencoder.train_on_batch(x=[batch], y=[batch, np.array(batch_centroids)])
+                # print(self.autoencoder.metrics_names)
+                # print(list_of_losses)
+
+                total_loss += list_of_losses[0]
+                reconstruct_loss += list_of_losses[1]
+                cluster_loss += list_of_losses[2]
+                print(vamb_clust.VAMB_POO)
+
+            history_obj = list()
+            tot_avg = total_loss / amount_batches
+            history_obj.append(tot_avg)
+
+            recon_avg = reconstruct_loss / amount_batches
+            history_obj.append(recon_avg)
+
+            clust_avg = cluster_loss / amount_batches
+            history_obj.append(clust_avg)
+
+            print(f'Total loss: {tot_avg}, \t Reconst loss: {recon_avg}, \t Clust loss: {clust_avg}')
+
+            self.tsne_embeddings(epoch=i+1,encoded_data=encoded_data_full, labels=labels, medoids=None, assignments=None)
+
+            tensorboard.on_epoch_end(i+1, named_logs(self.autoencoder, history_obj))
+        self.embeddings_projector(epoch=i+1, labels=labels, assignments=all_assignments, medoids=None, encodings=encoded_data_full)
+        tensorboard.on_train_end(None)
+        dbscan_instance = sklearn.cluster.DBSCAN(eps=0.5, min_samples=10)
+
+        print("Final clustering commencing... please wait...")
+        enc = self.encode(self.feature_matrix)
+        dbscan_instance.fit(enc)
+        self.bins = np.array(dbscan_instance.labels_)
+        print("Binning complete.")
+
+
 
 
 

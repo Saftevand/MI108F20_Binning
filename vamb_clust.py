@@ -9,7 +9,7 @@ import tensorflow as tf
 _DEFAULT_RADIUS = 0.06 # a.k.a default threshold
 # Distance within which to search for medoid point
 _MEDOID_RADIUS = 0.05 # original 0.05
-
+VAMB_POO = 0
 _DELTA_X = 0.005
 _XMAX = 0.3
 #
@@ -302,13 +302,13 @@ def _find_threshold(histogram, peak_valley_ratio, cuda):
             peak_density = density
 
         # Peak is over when density drops below 60% of peak density
-        if not peak_over and density < 0.6 * peak_density:
+        if not peak_over and density < 0.8 * peak_density:
             peak_over = True
             density_at_minimum = density
 
         # If another peak is detected, we stop
-        if peak_over and density > 1.5 * density_at_minimum:
-            break
+        #if peak_over and density > 1.5 * density_at_minimum:
+        #    break
 
         # Now find the minimum after the peak
         if peak_over and density < density_at_minimum:
@@ -376,10 +376,7 @@ def _calc_distances(matrix, index):
     return dists
 
 def _calc_distances_euclidean(matrix, index):
-    dists = _torch.norm(matrix - matrix[index], dim=1)
-    dists = dists / dists.max()
-    dists[index] = 0
-    return dists
+    return _torch.sqrt(((matrix-matrix[index])**2).sum(1))
 
 def _sample_medoid(matrix, kept_mask, medoid, threshold, cuda):
     """Returns:
@@ -387,7 +384,8 @@ def _sample_medoid(matrix, kept_mask, medoid, threshold, cuda):
     - A vector of distances to all points
     - The mean distance from medoid to the other points in the first vector
     """
-
+    global VAMB_POO
+    VAMB_POO+=1
     distances = _calc_distances_euclidean(matrix, medoid)
     cluster = _smaller_indices(distances, kept_mask, threshold, cuda)
 
