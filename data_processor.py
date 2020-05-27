@@ -8,6 +8,7 @@ import cuml
 import cudf
 import pandas as pd
 import binner
+from sklearn.model_selection import train_test_split
 # import matplotlib.pyplot as plt
 
 def get_tnfs(path):
@@ -111,12 +112,36 @@ def get_featurematrix(args):
     if args.savepathdepth:
         np.save(args.savepathdepth +"depth", depth)
 
-
-    feature_matrix = np.hstack([tnfs, depth])
+    feature_matrix, x_train, x_valid = preprocess_data(tnfs, depth)
+    #feature_matrix = np.hstack([tnfs, depth])
     #np.save("full_feature_matrix", feature_matrix)
 
-    return feature_matrix, contig_ids
+    return feature_matrix, contig_ids, x_train, x_valid
 
+def preprocess_data(tnfs, depths):
+
+    tnf_shape = tnfs.shape[1]
+    depth_shape = depths.shape[1]
+    number_of_features = tnf_shape + depth_shape
+    tnf_weight = tnf_shape / number_of_features
+    depth_weight = depth_shape / number_of_features
+    weighted_tnfs = tnfs * tnf_weight
+    weighted_depths = depths * depth_weight
+
+    # feature_matrix = np.hstack([weighted_tnfs, weighted_depths])
+    feature_matrix = np.hstack([tnfs, depths])
+    x_train, x_valid = train_test_split(feature_matrix, test_size=0.2, shuffle=True)
+    training_mean = np.mean(x_train, axis=0)
+    training_std = np.std(feature_matrix, axis=0)
+
+    x_train -= training_mean
+    x_train /= training_std
+
+    x_valid -= training_mean
+    x_valid /= training_std
+    feature_matrix -= training_mean
+    feature_matrix /= training_std
+    return feature_matrix, x_train, x_valid
 
 def get_train_and_validation_data(feature_matrix, split_value=0.8):
     # TODO måske skal ham her være lidt bedre. Det er farligt at tage de første x % hver gang

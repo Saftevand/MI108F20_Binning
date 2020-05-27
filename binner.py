@@ -22,17 +22,19 @@ from collections import Counter
 from tensorboard.plugins import projector
 from collections import Counter
 
+
 import torch
 
 
 
 class Binner(abc.ABC):
-    def __init__(self, contig_ids, clustering_method, split_value, log_dir, feature_matrix=None, labels=None):
+    def __init__(self, contig_ids, clustering_method, split_value, log_dir, feature_matrix=None, labels=None, x_train=None, x_valid=None):
         self.feature_matrix = feature_matrix
         self.bins = None
         self.contig_ids = contig_ids
         self.clustering_method = clustering_method
-        self.x_train, self.x_valid = data_processor.get_train_and_validation_data(feature_matrix=self.feature_matrix, split_value=split_value)
+        self.x_train = x_train
+        self.x_valid = x_valid
         self.encoder = None
         self.full_AE_train_history = None
         self.log_dir = f'{log_dir}/logs'
@@ -147,9 +149,9 @@ class Sequential_Binner(Binner):
 
 class Badass_Binner(Binner):
 
-    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix, log_dir, labels=None):
+    def __init__(self, split_value, contig_ids, clustering_method, feature_matrix, log_dir, labels=None, x_train=None, x_valid=None):
         super().__init__(contig_ids=contig_ids, clustering_method=clustering_method, feature_matrix=feature_matrix,
-                         split_value=split_value, log_dir=log_dir, labels=labels)
+                         split_value=split_value, log_dir=log_dir, labels=labels, x_train=x_train, x_valid=x_valid)
         self._input_layer_size = None
         self.decoder = None
         self.decoder = None
@@ -184,15 +186,17 @@ class Badass_Binner(Binner):
         print("Loaded autoencoder")
 
 
-    def do_binning(self, load_model=False):
+    def do_binning(self, load_model=False, lars_load=True):
         if not load_model:
             self.build_pretraining_model([100, 100, 200, 32], False, 4, learning_rate=0.001)  # default adam = 0.001
             self.pretrain(self.feature_matrix, self.labels, batch_size=128, epochs=400, validation_split=0.2, shuffle=True)
             self.extract_encoder()
             self.save_autoencoder()
+        elif lars_load:
+            self.autoencoder = tf.keras.models.load_model('model_10_dims.h5')
         else:
             self.load_autoencoder()
-            self.extract_encoder()
+
 
         '''
         encoded = self.encode(self.feature_matrix)
@@ -210,10 +214,11 @@ class Badass_Binner(Binner):
 
         print(snd)
         '''
-
+        self.extract_encoder()
         self.include_clustering_loss(learning_rate=0.0001, loss_weights=[1, 0.05])
+
         self.fit_dbscan(self.feature_matrix, y=self.labels, batch_size=4000, epochs=1, cuda=True)
-        #self.bins = self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix))
+            #self.bins = self.clustering_method.do_clustering(self.encoder.predict(self.feature_matrix))
 
         return self.bins
 
@@ -369,6 +374,41 @@ class Badass_Binner(Binner):
                                             validation_split=validation_split, shuffle=shuffle,
                                             callbacks=[tensorboard_callback])
         #np.save('latent_representation', self.encode(self.feature_matrix))
+
+    def include_lars_loss(self, learning_rate=0.001, loss_weights=[0.5, 0.5]):
+        #output_of_input = self.autoencoder.layers[0].output
+        #output_of_input = self.autoencoder.get_layer('Encoder').get_layer('input').output
+        #latent_output = self.autoencoder.get_layer('Encoder').get_layer('embedding_layer').output
+        #decoder_output = self.autoencoder.layers[-1].output
+
+        #decoder_input = self.autoencoder.get_layer('Decoder').get_layer('embedding').output
+        #decoder_output = self.autoencoder.get_layer('Decoder').get_layer('Decoder_output_layer').output
+
+        encoder = self.autoencoder.get_layer('Encoder')
+        latent_output = encoder.output
+        decoder = self.autoencoder.get_layer('Decoder')
+
+        #outer_input = self.autoencoder.get_layer('Input_features').output
+        outer_input = tf.keras.layers.Input(shape=(141,), name="Input_features")
+        embedded_features = encoder(outer_input)
+        reconstructed_features = decoder(embedded_features)
+
+        stacked_ae = tf.keras.Model(inputs=[outer_input], outputs=[reconstructed_features, latent_output], name='new_AE')
+
+        #rerouted_autoencoder = keras.Model(inputs=[output_of_input], outputs=[decoder_output, latent_output], name='2_outs_autoencoder')
+
+        opt = keras.optimizers.Adam(learning_rate=learning_rate)
+
+        def cosine_dist(y_true, y_pred):
+            losses = tf.keras.losses.CosineSimilarity(axis=1)(y_true, y_pred)
+
+            return tf.abs(losses)
+        # , loss_weights=[0., 1.]
+        stacked_ae.compile(optimizer=opt, loss=['mae', 'mse'], loss_weights=loss_weights)
+
+        self.autoencoder = stacked_ae
+
+        print(self.autoencoder.summary())
 
     def include_clustering_loss(self, learning_rate=0.001, loss_weights=[0.5, 0.5]):
         output_of_input = self.autoencoder.layers[0].output
@@ -1181,14 +1221,14 @@ class Badass_Binner(Binner):
 
                 # 2. encode all data
                 encoded_data_full = self.encode(data).numpy()
-
+                print(encoded_data_full[:4])
                 # 3. cluster
                 assigned_medoids_per_contig = np.zeros(encoded_data_full.shape)
                 assignments = np.zeros(len(encoded_data_full))
                 first = time.strftime('%H:%M:%S')
                 print(first)
 
-                dbscan_instance = sklearn.cluster.DBSCAN(eps=0.5, min_samples=10)
+                dbscan_instance = sklearn.cluster.DBSCAN(eps=2, min_samples=2)
 
                 # dbscan_instance.fit(encoded_data_full)
                 dbscan_instance.fit(encoded_data_full)
@@ -1291,10 +1331,10 @@ class Badass_Binner(Binner):
 
             print(f'Total loss: {tot_avg}, \t Reconst loss: {recon_avg}, \t Clust loss: {clust_avg}')
 
-            self.tsne_embeddings(epoch=i+1,encoded_data=encoded_data_full, labels=labels, medoids=None, assignments=None)
+            #self.tsne_embeddings(epoch=i+1,encoded_data=encoded_data_full, labels=labels, medoids=None, assignments=None)
 
             tensorboard.on_epoch_end(i+1, named_logs(self.autoencoder, history_obj))
-        self.embeddings_projector(epoch=i+1, labels=labels, assignments=all_assignments, medoids=None, encodings=encoded_data_full)
+        #self.embeddings_projector(epoch=i+1, labels=labels, assignments=all_assignments, medoids=None, encodings=encoded_data_full)
         tensorboard.on_train_end(None)
         dbscan_instance = sklearn.cluster.DBSCAN(eps=0.5, min_samples=10)
 
@@ -1303,9 +1343,6 @@ class Badass_Binner(Binner):
         dbscan_instance.fit(enc)
         self.bins = np.array(dbscan_instance.labels_)
         print("Binning complete.")
-
-
-
 
 
 
@@ -1801,13 +1838,13 @@ class DEC_Binner_Xifeng(DEC):
 
 
 
-def create_binner(split_value, binner_type, clustering_method, contig_ids, feature_matrix, log_dir, labels=None):
+def create_binner(split_value, binner_type, clustering_method, contig_ids, feature_matrix, log_dir, labels=None, x_train=None, x_valid=None ):
     clustering_method = get_clustering(clustering_method)
 
     binner_type = get_binner(binner_type)
 
     binner_instance = binner_type(split_value=split_value, contig_ids=contig_ids, clustering_method=clustering_method(),
-                                  feature_matrix=feature_matrix, log_dir=log_dir, labels=labels)
+                                  feature_matrix=feature_matrix, log_dir=log_dir, labels=labels, x_train=x_train, x_valid=x_valid)
     return binner_instance
 
 

@@ -3,7 +3,7 @@ import random
 import tensorflow as tf
 from tensorboard.plugins import projector
 #import matplotlib.pyplot as plt
-#from tensorboard import program
+from tensorboard import program
 import time
 from sklearn import decomposition
 import seaborn as sns
@@ -12,13 +12,16 @@ import os
 from collections import Counter
 from collections import defaultdict
 from sklearn.model_selection import train_test_split
-dataset_path = "D:\datasets\cami_high"
+from tensorflow.keras import backend as K
+dataset_path = "/mnt/cami_high"
 log_dir = os.path.join('Logs', time.strftime("run_%Y_%m_%d-%H_%M_%S"))
+#log_dir = os.path.join('Logs', "PCA50")
 
 
-#tb = program.TensorBoard()
-#tb.configure(argv=[None, '--logdir', '/Logs', '--host', '0.0.0.0', '--port', '23543'])
-#url = tb.launch()
+
+tb = program.TensorBoard()
+tb.configure(argv=[None, '--logdir', 'Logs', '--host', '0.0.0.0', '--port', '13337'])
+url = tb.launch()
 
 def load_data():
     tnfs = np.load(os.path.join(dataset_path, "tnfs_high.npy"))
@@ -144,7 +147,7 @@ def project_data(data, contig_names, contig_id_to_bin_id, bins_to_plot=10, run_o
         sns.scatterplot(data_to_project[:, 0], data_to_project[:, 1])
         plt.show()
 
-    variance_of_components = pca.explained_variance_ratio_
+    #variance_of_components = pca.explained_variance_ratio_
 
     data_variable = tf.Variable(data_to_project)
     checkpoint = tf.train.Checkpoint(embedding=data_variable)
@@ -158,7 +161,7 @@ def project_data(data, contig_names, contig_id_to_bin_id, bins_to_plot=10, run_o
     embedding.tensor_name = f'embedding/.ATTRIBUTES/VARIABLE_VALUE'
     embedding.metadata_path = 'metadata.tsv'
     projector.visualize_embeddings(log_dir, config)
-    print(f'Variance explained by first two components: {variance_of_components}')
+    #print(f'Variance explained by first two components: {variance_of_components}')
 
 
 def stacked_autoencoder(x_train, x_valid, no_layers=3, no_neurons_hidden=200, no_neurons_embedding=32, epochs=100, drop=False, bn=False):
@@ -166,7 +169,7 @@ def stacked_autoencoder(x_train, x_valid, no_layers=3, no_neurons_hidden=200, no
     #    print(f'Avg {i}: \t {np.mean(val)}')
     #split data
     input_shape = x_train.shape[1]
-    activation_fn = 'relu'
+    activation_fn = 'elu'
     init_fn = 'he_normal'
     #regularizer = tf.keras.regularizers.l2()
     regularizer = None
@@ -226,16 +229,129 @@ def stacked_autoencoder(x_train, x_valid, no_layers=3, no_neurons_hidden=200, no
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
 
+    var = stacked_ae.get_layer('Encoder').get_layer('embedding_layer')
+    def create_loss(layer):
+        def contractive_loss(y_pred, y_true):
+            mse = K.mean(K.square(y_true - y_pred), axis=1)
+
+            W = K.variable(value=layer.get_weights()[0])  # N x N_hidden
+            W = K.transpose(W)  # N_hidden x N
+            h = layer.output
+            dh = h * (1 - h)  # N_batch x N_hidden
+            lam = 1e-4
+            # N_batch x N_hidden * N_hidden x 1 = N_batch x 1
+            contractive = lam * K.sum(dh ** 2 * K.sum(W ** 2, axis=1), axis=1)
+
+            return mse + contractive
+        return contractive_loss
+
+
     stacked_ae.compile(optimizer=optimizer, loss='mae')
 
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
     print(encoder.summary())
     print(decoder.summary())
     print(stacked_ae.summary())
-    history = stacked_ae.fit(x_train, x_train, epochs=epochs, batch_size=128,
-                             validation_data=(x_valid, x_valid), shuffle=True, callbacks=[tensorboard_callback])
+
+
+    history = stacked_ae.fit(x_train, x_train, epochs=50, batch_size=32, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+    history = stacked_ae.fit(x_train, x_train, epochs=50, batch_size=64, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+    history = stacked_ae.fit(x_train, x_train, epochs=100, batch_size=128, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+    history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=256, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+    history = stacked_ae.fit(x_train, x_train, epochs=200, batch_size=512, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+    history = stacked_ae.fit(x_train, x_train, epochs=200, batch_size=1024, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+
     return stacked_ae
 
+def hvordan_er_det_her_ikke_måden_at_lave_en_AE_på(x_train, x_valid, no_layers=3, no_neurons_hidden=200, no_neurons_embedding=32, epochs=100, drop=False, bn=False, denoise=False):
+    if drop and denoise:
+        print("HOLD STOP. DROPOUT + DENOISING det er for meget")
+        return
+
+    #split data
+    input_shape = x_train.shape[1]
+    activation_fn = 'elu'
+    init_fn = 'he_normal'
+    #regularizer = tf.keras.regularizers.l2()
+    regularizer = None
+
+    #Create input layer
+    encoder_input = tf.keras.layers.Input(shape=(input_shape,), name="input")
+    layer = encoder_input
+
+    if no_layers == 0:
+        optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+        init_fn = tf.keras.initializers.RandomNormal()
+
+        layer = tf.keras.layers.Dense(units=no_neurons_embedding, activation=activation_fn, kernel_initializer=init_fn, kernel_regularizer=regularizer, name=f'Encoder')(layer)
+        out = tf.keras.layers.Dense(units=input_shape, kernel_initializer=init_fn, name='Decoder_output_layer')(layer)
+
+        small_AE = tf.keras.Model(encoder_input, out, name='Decoder')
+        small_AE.compile(optimizer=optimizer, loss='mae')
+        small_AE.fit(x_train, x_train, epochs=epochs, validation_data=(x_valid, x_valid), shuffle=True)
+        return small_AE
+
+    layer = tf.keras.layers.Dropout(.2)(layer) if denoise else layer
+
+    #Create encoding layers
+    for layer_index in range(no_layers):
+        layer = tf.keras.layers.Dropout(.2)(layer) if drop else layer
+        layer = tf.keras.layers.BatchNormalization()(layer) if bn else layer
+        layer = tf.keras.layers.Dense(units=no_neurons_hidden, activation=activation_fn, kernel_initializer=init_fn, kernel_regularizer=regularizer,
+                                      name=f'encoding_layer_{layer_index}')(layer)
+
+    #create embedding layer
+    layer = tf.keras.layers.BatchNormalization()(layer) if bn else layer
+    embedding_layer = tf.keras.layers.Dense(units=no_neurons_embedding, kernel_initializer=init_fn,
+                                  name='latent_layer')(layer)
+
+
+    # Create decoding layers
+    layer = embedding_layer
+
+    for layer_index in range(no_layers):
+            layer = tf.keras.layers.Dropout(.2)(layer) if drop else layer
+            layer = tf.keras.layers.BatchNormalization()(layer) if bn else layer
+            layer = tf.keras.layers.Dense(units=no_neurons_hidden, activation=activation_fn, kernel_initializer=init_fn, kernel_regularizer=regularizer,
+                                          name=f'decoding_layer_{layer_index}')(layer)
+
+    layer = tf.keras.layers.Dropout(.2)(layer) if drop else layer
+    layer = tf.keras.layers.BatchNormalization()(layer) if bn else layer
+    decoder_output = tf.keras.layers.Dense(units=input_shape, kernel_initializer=init_fn,
+                                  name='Decoder_output_layer')(layer)
+
+
+    stacked_ae = tf.keras.Model(encoder_input, decoder_output, name='autoencoder')
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+
+    stacked_ae.compile(optimizer=optimizer, loss='mae')
+
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
+    print(stacked_ae.summary())
+
+
+    history = stacked_ae.fit(x_train, x_train, epochs=50, batch_size=32, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+    history = stacked_ae.fit(x_train, x_train, epochs=50, batch_size=64, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+    history = stacked_ae.fit(x_train, x_train, epochs=100, batch_size=128, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+    history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=256, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+    history = stacked_ae.fit(x_train, x_train, epochs=200, batch_size=512, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+    history = stacked_ae.fit(x_train, x_train, epochs=200, batch_size=1024, validation_data=(x_valid, x_valid),
+                             shuffle=True, callbacks=[tensorboard_callback])
+
+    return stacked_ae
 
 def sensitivity(autoencoder, dataset):
 
@@ -271,6 +387,12 @@ def sensitivity(autoencoder, dataset):
     plt.show()
     return gradients
 
+def pull_out_encoder(autoencoder):
+    input = autoencoder.get_layer('input').output
+    latent_output = autoencoder.get_layer('latent_layer').output
+    encoder = tf.keras.Model(input, latent_output, name="encoder")
+    print(encoder.summary())
+    return encoder
 
 def main():
     tnfs, contig_ids_np, depth = load_data()
@@ -279,10 +401,14 @@ def main():
 
     # Run AE
     if True:
-        autoencoder = stacked_autoencoder(x_train, x_valid)
-        autoencoder.save('my_model.h5')
-        encoder = autoencoder.get_layer('Encoder')
+        autoencoder = hvordan_er_det_her_ikke_måden_at_lave_en_AE_på(x_train, x_valid, no_layers=2,
+                                                                     no_neurons_hidden=200, no_neurons_embedding=10,
+                                                                     epochs=200, drop=False, bn=False, denoise=False)
+        autoencoder.save('model_10_dims.h5')
+        #encoder = autoencoder.get_layer('Encoder')
+        encoder = pull_out_encoder(autoencoder)
         embeddings = encoder(feature_matrix_normalized, training=False)
+
         sensitivity(autoencoder, feature_matrix_normalized)
     else:
         autoencoder = tf.keras.models.load_model('my_model.h5')

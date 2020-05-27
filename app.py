@@ -9,6 +9,7 @@ from tensorflow import keras
 import clustering_methods
 from tensorboard import program
 from pathlib import Path
+import newBinners
 
 
 def main():
@@ -42,13 +43,12 @@ def main():
     #print(len(binid_to_int.keys()))
 
 
-    feature_matrix, contig_ids = data_processor.get_featurematrix(args)
+    feature_matrix, contig_ids, x_train, x_valid = data_processor.get_featurematrix(args)
 
-    binner_instance = binner.create_binner(split_value=0.8, clustering_method=args.clustering,
-                                           binner_type=args.binnertype, feature_matrix=feature_matrix,
-                                           contig_ids=contig_ids, log_dir=args.outdir, labels=labels)
+    binner_instance = newBinners.create_binner(binner_type=args.binnertype, feature_matrix=feature_matrix,
+                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid)
 
-    binner_instance.do_binning(load_model=True)
+    binner_instance.do_binning(load_model=True, load_clustering_AE=False)
 
     results = binner_instance.get_assignments()
 
