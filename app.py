@@ -48,7 +48,7 @@ def main():
     binner_instance = newBinners.create_binner(binner_type=args.binnertype, feature_matrix=feature_matrix,
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid)
 
-    binner_instance.do_binning(load_model=True, load_clustering_AE=False)
+    binner_instance.do_binning(load_model=False, load_clustering_AE=False)
 
     results = binner_instance.get_assignments()
 

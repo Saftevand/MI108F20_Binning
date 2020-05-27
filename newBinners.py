@@ -52,6 +52,23 @@ class Binner(abc.ABC):
         print(encoder.summary())
         return encoder
 
+    def pretraining(self, stacked_ae, x_train, x_valid):
+
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
+
+        history = stacked_ae.fit(x_train, x_train, epochs=50, batch_size=32, validation_data=(x_valid, x_valid),
+                                 shuffle=True, callbacks=[tensorboard_callback])
+        history = stacked_ae.fit(x_train, x_train, epochs=100, batch_size=64, validation_data=(x_valid, x_valid),
+                                 shuffle=True, callbacks=[tensorboard_callback])
+        history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=128, validation_data=(x_valid, x_valid),
+                                 shuffle=True, callbacks=[tensorboard_callback])
+        history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=256, validation_data=(x_valid, x_valid),
+                                 shuffle=True, callbacks=[tensorboard_callback])
+        history = stacked_ae.fit(x_train, x_train, epochs=300, batch_size=512, validation_data=(x_valid, x_valid),
+                                 shuffle=True, callbacks=[tensorboard_callback])
+        history = stacked_ae.fit(x_train, x_train, epochs=300, batch_size=1024, validation_data=(x_valid, x_valid),
+                                 shuffle=True, callbacks=[tensorboard_callback])
+
     def include_clustering_loss(self, learning_rate=0.001, loss_weights=[0.5, 0.5]):
         output_of_input = self.autoencoder.layers[0].output
         decoder_output = self.autoencoder.layers[-1].output
@@ -77,11 +94,41 @@ class Binner(abc.ABC):
         dbscan_instance = sklearn.cluster.DBSCAN(eps=eps, min_samples=min_samples)
 
         print("Final clustering...")
-        enc = self.encoder(self.feature_matrix)
+        enc = self.encoder.predict(self.feature_matrix)
         dbscan_instance.fit(enc)
-        bins = np.array(dbscan_instance.labels_)
+
+
+        '''herfra ændringer'''
+        all_assignments = np.array(dbscan_instance.labels_)
+
+        batch_centroids = []
+        centroid_dict = {}
+        final_assignments = all_assignments.copy()
+        for cluster_label in set(all_assignments):
+            # if outlier
+            if cluster_label == -1:
+                continue
+
+            cluster_mask = (all_assignments == cluster_label)
+            encoded_cluster = enc[cluster_mask]
+            centroid = np.mean(encoded_cluster, axis=0)
+            centroid_dict[cluster_label] = centroid
+
+        centroids = np.vstack(list(centroid_dict.values()))
+
+        for index, (contig, cluster_label) in enumerate(zip(enc, all_assignments)):
+            if cluster_label == -1:
+                dists = np.sqrt(np.sum(((centroids - contig) ** 2), axis=1))
+                shortest_dist = np.argmin(dists)
+
+                batch_centroids.append(centroid_dict[shortest_dist])
+                final_assignments[index] = shortest_dist
+
+
         print("Binning complete.")
-        return bins
+
+        print(f'final clusters {Counter(final_assignments)}')
+        return final_assignments
 
 
 class Stacked_Binner(Binner):
@@ -90,43 +137,27 @@ class Stacked_Binner(Binner):
                  x_valid=None):
         super().__init__(contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels, x_train=x_train, x_valid=x_valid)
 
-    def pretraining(self, stacked_ae, x_train, x_valid):
 
-        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
-
-        history = stacked_ae.fit(x_train, x_train, epochs=50, batch_size=32, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=100, batch_size=64, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=128, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=256, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=300, batch_size=512, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=300, batch_size=1024, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
 
     def create_stacked_AE(self, x_train, x_valid, no_layers=3, no_neurons_hidden=200,
                                                        no_neurons_embedding=32, epochs=100, drop=False, bn=False,
-                                                       denoise=False):
+                                                       denoise=False, regularizer=None):
         if drop and denoise:
             print("HOLD STOP. DROPOUT + DENOISING det er for meget")
             return
 
         # split data
         input_shape = x_train.shape[1]
-        activation_fn = 'elu'
+        activation_fn = 'selu'
         init_fn = 'he_normal'
-        # regularizer = tf.keras.regularizers.l2()
-        regularizer = None
+
 
         # Create input layer
         encoder_input = tf.keras.layers.Input(shape=(input_shape,), name="input")
         layer = encoder_input
 
         if no_layers == 0:
-            optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+            optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
             init_fn = tf.keras.initializers.RandomNormal()
 
             layer = tf.keras.layers.Dense(units=no_neurons_embedding, activation=activation_fn,
@@ -181,12 +212,13 @@ class Stacked_Binner(Binner):
         return stacked_ae
 
     def do_binning(self, load_model=False, load_clustering_AE = True):
+        '''Method is ALMOST identical to Sparse_AE... uses Stacked AE instead'''
         if load_model:
             self.autoencoder = tf.keras.models.load_model('autoencoder.h5')
         else:
             self.autoencoder = self.create_stacked_AE(self.x_train, self.x_valid, no_layers=3, no_neurons_hidden=200,
-                                                       no_neurons_embedding=50, epochs=100, drop=False, bn=False,
-                                                       denoise=False)
+                                                       no_neurons_embedding=32, epochs=100, drop=False, bn=False,
+                                                       denoise=False, regularizer=tf.keras.regularizers.l1())
             self.pretraining(self.autoencoder, self.x_train, self.x_valid)
             self.autoencoder.save('autoencoder.h5')
             print("AE saved")
@@ -196,8 +228,8 @@ class Stacked_Binner(Binner):
         print("Encoder saved")
 
         #DBSCAN params
-        eps=1
-        min_samples=4
+        eps=0.5
+        min_samples=10
         if load_clustering_AE:
             self.clustering_autoencoder = tf.keras.models.load_model("clustering_AE.h5")
             self.encoder = self.extract_clustering_encoder()
@@ -261,7 +293,7 @@ class Stacked_Binner(Binner):
                 print(f'Current batch: {batch_no + 1} of total batches: {amount_batches}')
 
                 # 2. encode all data
-                encoded_data_full = self.encoder(data).numpy()
+                encoded_data_full = self.encoder.predict(data)
 
                 # 3. cluster
                 assigned_medoids_per_contig = np.zeros(encoded_data_full.shape)
@@ -372,6 +404,127 @@ class Stacked_Binner(Binner):
         tensorboard.on_train_end(None)
 
 
+class Sparse_Binner(Stacked_Binner):
+    #TODO how to save regularizer
+    def create_sparse_AE(self, x_train, x_valid, no_layers=3, no_neurons_hidden=200,
+                                                       no_neurons_embedding=32, epochs=100, drop=False, bn=False,
+                                                       denoise=False, regularizer=None):
+        if drop and denoise:
+            print("HOLD STOP. DROPOUT + DENOISING det er for meget")
+            return
+
+        # split data
+        input_shape = x_train.shape[1]
+        activation_fn = 'selu'
+        init_fn = 'he_normal'
+
+
+        # Create input layer
+        encoder_input = tf.keras.layers.Input(shape=(input_shape,), name="input")
+        layer = encoder_input
+
+        if no_layers == 0:
+            optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+            init_fn = tf.keras.initializers.RandomNormal()
+
+            layer = tf.keras.layers.Dense(units=no_neurons_embedding, activation=activation_fn,
+                                          kernel_initializer=init_fn, kernel_regularizer=regularizer, name=f'Encoder')(
+                layer)
+            out = tf.keras.layers.Dense(units=input_shape, kernel_initializer=init_fn, name='Decoder_output_layer')(
+                layer)
+
+            small_AE = tf.keras.Model(encoder_input, out, name='Decoder')
+            small_AE.compile(optimizer=optimizer, loss='mae')
+            small_AE.fit(x_train, x_train, epochs=epochs, validation_data=(x_valid, x_valid), shuffle=True)
+            return small_AE
+
+        layer = tf.keras.layers.Dropout(.2)(layer) if denoise else layer
+
+        # Create encoding layers
+        for layer_index in range(no_layers):
+            layer = tf.keras.layers.Dropout(.2)(layer) if drop else layer
+            layer = tf.keras.layers.BatchNormalization()(layer) if bn else layer
+            layer = tf.keras.layers.Dense(units=no_neurons_hidden, activation=activation_fn, kernel_initializer=init_fn,
+                                          kernel_regularizer=regularizer,
+                                          name=f'encoding_layer_{layer_index}')(layer)
+
+        # create embedding layer
+        layer = tf.keras.layers.BatchNormalization()(layer) if bn else layer
+        embedding_layer = tf.keras.layers.Dense(units=no_neurons_embedding, kernel_initializer=init_fn, activation=tf.keras.activations.sigmoid, activity_regularizer=KLDivergenceRegularizer,
+                                                name='latent_layer')(layer)
+
+        # Create decoding layers
+        layer = embedding_layer
+
+        for layer_index in range(no_layers):
+            layer = tf.keras.layers.Dropout(.2)(layer) if drop else layer
+            layer = tf.keras.layers.BatchNormalization()(layer) if bn else layer
+            layer = tf.keras.layers.Dense(units=no_neurons_hidden, activation=activation_fn, kernel_initializer=init_fn,
+                                          kernel_regularizer=regularizer,
+                                          name=f'decoding_layer_{layer_index}')(layer)
+
+        layer = tf.keras.layers.Dropout(.2)(layer) if drop else layer
+        layer = tf.keras.layers.BatchNormalization()(layer) if bn else layer
+        decoder_output = tf.keras.layers.Dense(units=input_shape, kernel_initializer=init_fn,
+                                               name='Decoder_output_layer')(layer)
+
+        stacked_ae = tf.keras.Model(encoder_input, decoder_output, name='autoencoder')
+
+        optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+
+        stacked_ae.compile(optimizer=optimizer, loss='mae')
+
+        print(stacked_ae.summary())
+
+        return stacked_ae
+
+    def do_binning(self, load_model=False, load_clustering_AE=True):
+        '''Method is ALMOST identical to Stacked_AE... uses sparse AE instead'''
+        if load_model:
+            self.autoencoder = tf.keras.models.load_model('autoencoder.h5', custom_objects={"KLDivergenceRegularizer": KLDivergenceRegularizer})
+        else:
+            self.autoencoder = self.create_sparse_AE(self.x_train, self.x_valid, no_layers=3, no_neurons_hidden=200,
+                                                      no_neurons_embedding=32, epochs=100, drop=False, bn=False,
+                                                      denoise=False, regularizer=tf.keras.regularizers.l1())
+            self.pretraining(self.autoencoder, self.x_train, self.x_valid)
+            self.autoencoder.save('autoencoder.h5')
+            print("AE saved")
+
+        self.encoder = self.extract_encoder()
+        self.encoder.save('encoder.h5')
+        print("Encoder saved")
+
+        # DBSCAN params
+        eps = 0.5
+        min_samples = 10
+        if load_clustering_AE:
+            self.clustering_autoencoder = tf.keras.models.load_model("clustering_AE.h5", custom_objects={"KLDivergenceRegularizer": KLDivergenceRegularizer})
+            self.encoder = self.extract_clustering_encoder()
+        else:
+            self.clustering_autoencoder = self.include_clustering_loss(learning_rate=0.0001, loss_weights=[1, 0.05])
+            self.fit_dbscan(self.feature_matrix, y=self.labels, batch_size=4000, epochs=1, cuda=True, eps=eps,
+                            min_samples=min_samples)
+            self.clustering_autoencoder.save('clustering_AE.h5')
+            print("clustering_AE saved")
+
+        self.bins = self.final_DBSCAN_clustering(eps=eps, min_samples=min_samples)
+        return self.bins
+
+
+class KLDivergenceRegularizer(tf.keras.regularizers.Regularizer):
+    def __init__(self, weight, target=0.1, **kwargs):
+        self.weight = weight
+        self.target = target
+        super().__init__(**kwargs)
+
+    def __call__(self, inputs):
+        mean_activities = tf.reduce_mean(inputs, axis=0)
+        return self.weight * (tf.keras.losses.kld(self.target, mean_activities) + tf.keras.losses.kld(1. - self.target,
+                                                                                                      1. - mean_activities))
+    def get_config(self):
+        base_config = super().get_config()
+        return {**base_config, "weight" : self.weight, "target" : self.target}
+
 def create_binner(binner_type, contig_ids, feature_matrix, labels=None, x_train=None, x_valid=None ):
     binner_type = binner_dict[binner_type]
 
@@ -379,6 +532,8 @@ def create_binner(binner_type, contig_ids, feature_matrix, labels=None, x_train=
                                   x_train=x_train, x_valid=x_valid)
     return binner_instance
 
+
 binner_dict = {
     'STACKED': Stacked_Binner,
+    'SPARSE': Sparse_Binner
 }
