@@ -55,7 +55,6 @@ class Binner(abc.ABC):
         #print(encoder.summary())
         return encoder
 
-
     def pretraining(self, epochs, batch_sizes):
 
         callback_projector = ProjectEmbeddingCallback(binner=self)
@@ -97,7 +96,6 @@ class Binner(abc.ABC):
                 callback_projector.on_epoch_end(current_epoch + 1)
                 current_epoch += 1
         callback_projector.on_train_end()
-
 
     def include_clustering_loss(self, learning_rate=0.001, loss_weights=[0.5, 0.5]):
         output_of_input = self.autoencoder.layers[0].output
@@ -160,8 +158,6 @@ class Stacked_Binner(Binner):
     def __init__(self, name, contig_ids, feature_matrix, labels=None, x_train=None,
                  x_valid=None, train_labels=None,validation_labels=None):
         super().__init__(name=name, contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels, x_train=x_train, x_valid=x_valid, train_labels=train_labels, valid_labels=validation_labels)
-
-
 
     def create_stacked_AE(self, x_train, x_valid, no_layers=3, no_neurons_hidden=200,
                                                        no_neurons_embedding=32, epochs=100, drop=False, bn=False,
@@ -265,7 +261,6 @@ class Stacked_Binner(Binner):
 
         self.bins = self.final_DBSCAN_clustering(eps=eps, min_samples=min_samples)
         return self.bins
-
 
     def fit_dbscan(self, x, y=None, batch_size=4000, epochs=10, cuda=True, eps=0.5, min_samples=10):
 
@@ -395,10 +390,6 @@ class Stacked_Binner(Binner):
         callback_projector.on_train_end()
         tensorboard.on_train_end(None)
 
-def print_status_bar(iteration, total, loss, metrics=None):
-    metrics = " - ".join(["{}: {:.4f}".format(m.name, m.result()) for m in [loss] + (metrics or [])])
-    end = "" if iteration < total else "\n"
-    print("\r{}/{} - ".format(iteration, total) + metrics, end=end)
 
 class Sparse_Binner(Stacked_Binner):
     #TODO how to save regularizer
@@ -484,7 +475,7 @@ class Sparse_Binner(Stacked_Binner):
             self.autoencoder = self.create_sparse_AE(self.x_train, self.x_valid, no_layers=3, no_neurons_hidden=200,
                                                       no_neurons_embedding=32, epochs=100, drop=False, bn=False,
                                                       denoise=False, regularizer=None, lr=0.001)
-            self.pretraining(self.autoencoder, self.x_train, self.x_valid)
+            self.pretraining(epochs=[100, 100], batch_sizes=[32, 64])
             self.autoencoder.save('autoencoder.h5')
             print("AE saved")
 
@@ -493,16 +484,16 @@ class Sparse_Binner(Stacked_Binner):
         print("Encoder saved")
 
         # DBSCAN params
-        eps = 0.5
-        min_samples = 4
+        eps = 0.3
+        min_samples =5
         if load_clustering_AE:
-            self.clustering_autoencoder = tf.keras.models.load_model("clustering_AE.h5", custom_objects={"KLDivergenceRegularizer": KLDivergenceRegularizer})
-            self.encoder = self.extract_clustering_encoder()
+            self.autoencoder = tf.keras.models.load_model("clustering_AE.h5", custom_objects={"KLDivergenceRegularizer": KLDivergenceRegularizer})
+            self.encoder = self.extract_encoder()
         else:
-            self.clustering_autoencoder = self.include_clustering_loss(learning_rate=0.0001, loss_weights=[1, 0.05])
+            self.autoencoder = self.include_clustering_loss(learning_rate=0.0001, loss_weights=[1, 0.05])
             self.fit_dbscan(self.feature_matrix, y=self.labels, batch_size=4000, epochs=1, cuda=True, eps=eps,
                             min_samples=min_samples)
-            self.clustering_autoencoder.save('clustering_AE.h5')
+            self.autoencoder.save('clustering_AE.h5')
             print("clustering_AE saved")
 
         self.bins = self.final_DBSCAN_clustering(eps=eps, min_samples=min_samples)
