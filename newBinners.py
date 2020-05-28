@@ -8,6 +8,8 @@ import os
 import sklearn
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import io
 from collections import Counter
 from tensorboard.plugins import projector
 import matplotlib.ticker as ticker
@@ -60,10 +62,8 @@ class Binner(abc.ABC):
         #print(encoder.summary())
         return encoder
 
-    def pretraining(self):
+    def pretraining(self, callbacks):
 
-        callback_projector = ProjectEmbeddingCallback(binner=self)
-        callback_projector.model = self
         file_writer = tf.summary.create_file_writer(self.log_dir)
 
         train_loss = []
@@ -97,10 +97,11 @@ class Binner(abc.ABC):
                     tf.summary.scalar('Training loss', mean_train_loss, step=current_epoch + 1)
                     tf.summary.scalar('Validation loss', validation_loss, step=current_epoch + 1)
                 train_loss.clear()
-
-                callback_projector.on_epoch_end(current_epoch + 1)
+                for callback in callbacks:
+                    callback.on_epoch_end(current_epoch + 1)
                 current_epoch += 1
-        callback_projector.on_train_end()
+        for callback in callbacks:
+            callback.on_train_end()
 
     def include_clustering_loss(self):
         output_of_input = self.autoencoder.layers[0].output
@@ -237,7 +238,10 @@ class Stacked_Binner(Binner):
             self.autoencoder = tf.keras.models.load_model('autoencoder.h5')
         else:
             self.autoencoder = self.create_stacked_AE()
-            self.pretraining()
+            callback_projector = ProjectEmbeddingCallback(binner=self)
+            callback_activity = ActivityCallback(binner=self)
+
+            self.pretraining(callbacks=[callback_projector, callback_activity])
             self.autoencoder.save('autoencoder.h5')
             print("AE saved")
 
@@ -469,7 +473,10 @@ class Sparse_Binner(Stacked_Binner):
             self.autoencoder = tf.keras.models.load_model('autoencoder.h5', custom_objects={"KLDivergenceRegularizer": KLDivergenceRegularizer})
         else:
             self.autoencoder = self.create_sparse_AE()
-            self.pretraining()
+            callback_projector = ProjectEmbeddingCallback(binner=self)
+            callback_activity = ActivityCallback(binner=self)
+
+            self.pretraining(callbacks=[callback_projector, callback_activity])
             self.autoencoder.save('autoencoder.h5')
             print("AE saved")
 
@@ -488,6 +495,8 @@ class Sparse_Binner(Stacked_Binner):
 
         self.bins = self.final_DBSCAN_clustering()
         return self.bins
+
+
 
 
 class KLDivergenceRegularizer(tf.keras.regularizers.Regularizer):
@@ -514,30 +523,24 @@ def create_binner(binner_type, contig_ids, feature_matrix, labels=None, x_train=
     return binner_instance
 
 
-binner_dict = {
-    'STACKED': Stacked_Binner,
-    'SPARSE': Sparse_Binner
-}
 
 class ProjectEmbeddingCallback(tf.keras.callbacks.Callback):
 
-    def __init__(self, binner, log_dir=None, project_every_modulo=10):
+    def __init__(self, binner, log_dir=None):
         super().__init__()
         self.binner = binner
         if log_dir == None:
             self.log_dir = self.binner.log_dir
         else:
             self.log_dir = log_dir
-        self.project_every_modulo = project_every_modulo
         self.embeddings = []
         self.config = projector.ProjectorConfig()
 
     def on_epoch_end(self, epoch, logs=None):
-        if epoch % self.project_every_modulo == 0:
-            embeddings = self.binner.extract_encoder()(self.binner.feature_matrix)
-            data_to_project = self.project_data(embedding=embeddings, epoch=epoch)
-            data_variable = tf.Variable(data_to_project, name=f'epoch{epoch}')
-            self.embeddings.append(data_variable)
+        embeddings = self.binner.extract_encoder()(self.binner.feature_matrix)
+        data_to_project = self.project_data(embedding=embeddings, epoch=epoch)
+        data_variable = tf.Variable(data_to_project, name=f'epoch{epoch}')
+        self.embeddings.append(data_variable)
     def on_train_end(self, logs=None):
         if len(self.embeddings) != 0:
             saver = tf.compat.v1.train.Saver(var_list=self.embeddings, save_relative_paths=True)
@@ -603,17 +606,22 @@ class ProjectEmbeddingCallback(tf.keras.callbacks.Callback):
 
 class ActivityCallback(tf.keras.callbacks.Callback):
 
-    def __init__(self, training_data):
-        self.training_data = training_data
+    def __init__(self, binner):
+        self.binner = binner
+        self.file_writer = tf.summary.create_file_writer(binner.log_dir)
         super().__init__()
 
+    def on_train_end(self):
+        pass
+
     def on_epoch_end(self, epoch, logs=None):
-        encoder = self.model.get_layer('Encoder')
-        activations = encoder.predict(self.training_data)
+        encoder = self.binner.extract_encoder()
+        activations = encoder.predict(self.binner.x_train)
         activations_flatten = activations.flatten()
         #activations_percentages = activations.flatten()/activations.size
         number_of_activations = activations.size
-        fig, ax = plt.subplots()
+
+        activation_percentage_figure, ax = plt.subplots()
         y_vals, x_vals, e_ = ax.hist(activations_flatten, edgecolor='black')
         ax.set_title("Embedding activations")
         ax.set_xlabel("Activations")
@@ -624,11 +632,9 @@ class ActivityCallback(tf.keras.callbacks.Callback):
         ax.set_yticks(ticks=np.arange(0.0, y_max * number_of_activations, 0.1 * number_of_activations,))
         ax.set_ylim(ax.get_yticks()[0], ax.get_yticks()[-1])
         ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=number_of_activations))
-        plt.show()
-
         mean_activities = tf.reduce_mean(activations, axis=0).numpy()
         number_neurons = mean_activities.size
-        fig, ax = plt.subplots()
+        neurons_activity_figure, ax = plt.subplots()
         y_vals, x_vals, e_ = ax.hist(mean_activities, edgecolor='black')
         ax.set_title("Activity neuron")
         ax.set_xlabel("Neuron Mean Activation")
@@ -637,4 +643,31 @@ class ActivityCallback(tf.keras.callbacks.Callback):
         ax.set_yticks(ticks=np.arange(0.0, y_max * number_neurons, 0.05 * number_neurons, ))
         ax.set_ylim(ax.get_yticks()[0], ax.get_yticks()[-1])
         ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=number_neurons))
-        plt.show()
+        with self.file_writer.as_default():
+            tf.summary.image("Activation histogram",plot_to_image(activation_percentage_figure), step=epoch)
+            tf.summary.image("Neuron histogram", plot_to_image(neurons_activity_figure), step=epoch)
+
+
+
+
+
+def plot_to_image(figure):
+    """Converts the matplotlib plot specified by 'figure' to a PNG image and
+    returns it. The supplied figure is closed and inaccessible after this call."""
+    # Save the plot to a PNG in memory.
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    # Closing the figure prevents it from being displayed directly inside
+    # the notebook.
+    plt.close(figure)
+    buf.seek(0)
+    # Convert PNG buffer to TF image
+    image = tf.image.decode_png(buf.getvalue(), channels=4)
+    # Add the batch dimension
+    image = tf.expand_dims(image, 0)
+    return image
+
+binner_dict = {
+    'STACKED': Stacked_Binner,
+    'SPARSE': Sparse_Binner
+}
