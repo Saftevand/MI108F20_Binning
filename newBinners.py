@@ -62,7 +62,7 @@ class Binner(abc.ABC):
         #print(encoder.summary())
         return encoder
 
-    def pretraining(self):
+    def pretraining(self, callbacks):
 
         file_writer = tf.summary.create_file_writer(self.log_dir)
 
@@ -237,13 +237,11 @@ class Stacked_Binner(Binner):
         if load_model:
             self.autoencoder = tf.keras.models.load_model('autoencoder.h5')
         else:
-            self.autoencoder = self.create_stacked_AE(self.x_train, self.x_valid, no_layers=3, no_neurons_hidden=200,
-                                                       no_neurons_embedding=32, epochs=100, drop=False, bn=False,
-                                                       denoise=False, regularizer=tf.keras.regularizers.l1(), lr=0.001)
+            self.autoencoder = self.create_stacked_AE()
             callback_projector = ProjectEmbeddingCallback(binner=self)
             callback_activity = ActivityCallback(binner=self)
 
-            self.pretraining([2, 3], [32, 64], callbacks=[callback_projector, callback_activity])
+            self.pretraining(callbacks=[callback_projector, callback_activity])
             self.autoencoder.save('autoencoder.h5')
             print("AE saved")
 
@@ -474,13 +472,11 @@ class Sparse_Binner(Stacked_Binner):
         if load_model:
             self.autoencoder = tf.keras.models.load_model('autoencoder.h5', custom_objects={"KLDivergenceRegularizer": KLDivergenceRegularizer})
         else:
-            self.autoencoder = self.create_sparse_AE(self.x_train, self.x_valid, no_layers=3, no_neurons_hidden=200,
-                                                      no_neurons_embedding=32, epochs=100, drop=False, bn=False,
-                                                      denoise=False, regularizer=None, lr=0.001)
+            self.autoencoder = self.create_sparse_AE()
             callback_projector = ProjectEmbeddingCallback(binner=self)
             callback_activity = ActivityCallback(binner=self)
 
-            self.pretraining([2,3],[32,64],callbacks=[callback_projector, callback_activity])
+            self.pretraining(callbacks=[callback_projector, callback_activity])
             self.autoencoder.save('autoencoder.h5')
             print("AE saved")
 
