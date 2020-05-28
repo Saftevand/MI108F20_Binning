@@ -68,7 +68,28 @@ def main():
 
     feature_matrix, contig_ids, x_train, x_valid = data_processor.get_featurematrix(args)
 
-    binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix,
+    pretrain_params = {
+        'learning_rate': 0.001,
+        'layer_size': 200,
+        'num_hidden_layers': 3,
+        'embedding_neurons': 32,
+        'activation_fn': 'elu',
+        'regularizer': None,
+        'denoise': False,
+        'dropout': False,
+        'BN': False,
+    }
+    clust_params = {
+        'learning_rate': 0.0001,
+        'loss_weights': [1, 0.05],  # [reconstruction, clustering]
+        'batch_size': 4000,
+        'epochs': 10,
+        'cuda': True,
+        'eps': 0.5,
+        'min_samples': 10
+    }
+
+    binner_instance = newBinners.create_binner(binner_type=args.binnertype, feature_matrix=feature_matrix,
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid)
 
     binner_instance.do_binning(load_model=True, load_clustering_AE=False)
