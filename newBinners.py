@@ -56,7 +56,7 @@ class Binner(abc.ABC):
 
         tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
 
-        history = stacked_ae.fit(x_train, x_train, epochs=50, batch_size=32, validation_data=(x_valid, x_valid),
+        history = stacked_ae.fit(x_train, x_train, epochs=100, batch_size=32, validation_data=(x_valid, x_valid),
                                  shuffle=True, callbacks=[tensorboard_callback])
         history = stacked_ae.fit(x_train, x_train, epochs=100, batch_size=64, validation_data=(x_valid, x_valid),
                                  shuffle=True, callbacks=[tensorboard_callback])
@@ -141,7 +141,7 @@ class Stacked_Binner(Binner):
 
     def create_stacked_AE(self, x_train, x_valid, no_layers=3, no_neurons_hidden=200,
                                                        no_neurons_embedding=32, epochs=100, drop=False, bn=False,
-                                                       denoise=False, regularizer=None):
+                                                       denoise=False, regularizer=None, lr=0.001):
         if drop and denoise:
             print("HOLD STOP. DROPOUT + DENOISING det er for meget")
             return
@@ -203,7 +203,7 @@ class Stacked_Binner(Binner):
 
         stacked_ae = tf.keras.Model(encoder_input, decoder_output, name='autoencoder')
 
-        optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
         stacked_ae.compile(optimizer=optimizer, loss='mae')
 
@@ -218,7 +218,7 @@ class Stacked_Binner(Binner):
         else:
             self.autoencoder = self.create_stacked_AE(self.x_train, self.x_valid, no_layers=3, no_neurons_hidden=200,
                                                        no_neurons_embedding=32, epochs=100, drop=False, bn=False,
-                                                       denoise=False, regularizer=tf.keras.regularizers.l1())
+                                                       denoise=False, regularizer=tf.keras.regularizers.l1(), lr=0.001)
             self.pretraining(self.autoencoder, self.x_train, self.x_valid)
             self.autoencoder.save('autoencoder.h5')
             print("AE saved")
@@ -406,9 +406,8 @@ class Stacked_Binner(Binner):
 
 class Sparse_Binner(Stacked_Binner):
     #TODO how to save regularizer
-    def create_sparse_AE(self, x_train, x_valid, no_layers=3, no_neurons_hidden=200,
-                                                       no_neurons_embedding=32, epochs=100, drop=False, bn=False,
-                                                       denoise=False, regularizer=None):
+    def create_sparse_AE(self, x_train, x_valid, no_layers=3, no_neurons_hidden=200, no_neurons_embedding=32,
+                         epochs=100, drop=False, bn=False, denoise=False, regularizer=None, lr=0.001):
         if drop and denoise:
             print("HOLD STOP. DROPOUT + DENOISING det er for meget")
             return
@@ -448,9 +447,12 @@ class Sparse_Binner(Stacked_Binner):
                                           kernel_regularizer=regularizer,
                                           name=f'encoding_layer_{layer_index}')(layer)
 
+        #create regularizer
+        KLDreg = KLDivergenceRegularizer(weight=0.5, target=0.1)
+
         # create embedding layer
         layer = tf.keras.layers.BatchNormalization()(layer) if bn else layer
-        embedding_layer = tf.keras.layers.Dense(units=no_neurons_embedding, kernel_initializer=init_fn, activation=tf.keras.activations.sigmoid, activity_regularizer=KLDivergenceRegularizer,
+        embedding_layer = tf.keras.layers.Dense(units=no_neurons_embedding, kernel_initializer=init_fn, activation=tf.keras.activations.sigmoid, activity_regularizer=KLDreg,
                                                 name='latent_layer')(layer)
 
         # Create decoding layers
@@ -470,7 +472,7 @@ class Sparse_Binner(Stacked_Binner):
 
         stacked_ae = tf.keras.Model(encoder_input, decoder_output, name='autoencoder')
 
-        optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
         stacked_ae.compile(optimizer=optimizer, loss='mae')
 
@@ -485,7 +487,7 @@ class Sparse_Binner(Stacked_Binner):
         else:
             self.autoencoder = self.create_sparse_AE(self.x_train, self.x_valid, no_layers=3, no_neurons_hidden=200,
                                                       no_neurons_embedding=32, epochs=100, drop=False, bn=False,
-                                                      denoise=False, regularizer=tf.keras.regularizers.l1())
+                                                      denoise=False, regularizer=None, lr=0.001)
             self.pretraining(self.autoencoder, self.x_train, self.x_valid)
             self.autoencoder.save('autoencoder.h5')
             print("AE saved")
@@ -496,7 +498,7 @@ class Sparse_Binner(Stacked_Binner):
 
         # DBSCAN params
         eps = 0.5
-        min_samples = 10
+        min_samples = 4
         if load_clustering_AE:
             self.clustering_autoencoder = tf.keras.models.load_model("clustering_AE.h5", custom_objects={"KLDivergenceRegularizer": KLDivergenceRegularizer})
             self.encoder = self.extract_clustering_encoder()
@@ -521,9 +523,10 @@ class KLDivergenceRegularizer(tf.keras.regularizers.Regularizer):
         mean_activities = tf.reduce_mean(inputs, axis=0)
         return self.weight * (tf.keras.losses.kld(self.target, mean_activities) + tf.keras.losses.kld(1. - self.target,
                                                                                                       1. - mean_activities))
+
     def get_config(self):
-        base_config = super().get_config()
-        return {**base_config, "weight" : self.weight, "target" : self.target}
+        return {"weight" : self.weight, "target" : self.target}
+
 
 def create_binner(binner_type, contig_ids, feature_matrix, labels=None, x_train=None, x_valid=None ):
     binner_type = binner_dict[binner_type]
