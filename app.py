@@ -66,8 +66,8 @@ def main():
         'layer_size': 200,
         'num_hidden_layers': 3,
         'embedding_neurons': 32,
-        'epochs': [100, 100, 150, 150],
-        'batch_sizes': [32, 64, 128, 256],
+        'epochs': [100, 100, 150, 150, 300, 300],
+        'batch_sizes': [32, 64, 128, 256, 512, 1024],
         'activation_fn': 'elu',
         'regularizer': None,
         'initializer': 'he_normal',
@@ -95,7 +95,7 @@ def main():
                                                train_labels=train_labels, validation_labels=validation_labels,
                                                pretraining_params=pretrain_params, clust_params=clust_params)
 
-    binner_instance.do_binning(load_model=True, load_clustering_AE=False)
+    binner_instance.do_binning(load_model=False, load_clustering_AE=False)
 
     results = binner_instance.get_assignments()
 
