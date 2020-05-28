@@ -62,27 +62,38 @@ def main():
 
     pretrain_params = {
         'learning_rate': 0.001,
+        'reconst_loss': 'mae',
         'layer_size': 200,
         'num_hidden_layers': 3,
         'embedding_neurons': 32,
+        'epochs': [100, 100, 150, 150],
+        'batch_sizes': [32, 64, 128, 256],
         'activation_fn': 'elu',
         'regularizer': None,
+        'initializer': 'he_normal',
         'denoise': False,
         'dropout': False,
+        'drop_and_denoise_rate': 0.2,
         'BN': False,
+        'sparseKLweight': 0.5,
+        'sparseKLtarget': 0.1
     }
     clust_params = {
         'learning_rate': 0.0001,
         'loss_weights': [1, 0.05],  # [reconstruction, clustering]
         'batch_size': 4000,
         'epochs': 10,
+        'reconst_loss': 'mse',
+        'clust_loss': 'mse',
         'cuda': True,
         'eps': 0.5,
         'min_samples': 10
     }
 
     binner_instance = newBinners.create_binner(binner_type=args.binnertype, feature_matrix=feature_matrix,
-                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid, train_labels=train_labels, validation_labels=validation_labels)
+                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid,
+                                               train_labels=train_labels, validation_labels=validation_labels,
+                                               pretraining_params=pretrain_params, clust_params=clust_params)
 
     binner_instance.do_binning(load_model=True, load_clustering_AE=False)
 
