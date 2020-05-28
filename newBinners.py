@@ -56,22 +56,48 @@ class Binner(abc.ABC):
         return encoder
 
 
-    def pretraining(self, stacked_ae, x_train, x_valid):
+    def pretraining(self, epochs, batch_sizes):
 
-        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
+        callback_projector = ProjectEmbeddingCallback(binner=self)
+        callback_projector.model = self
+        file_writer = tf.summary.create_file_writer(self.log_dir)
 
-        history = stacked_ae.fit(x_train, x_train, epochs=100, batch_size=32, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=100, batch_size=64, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=128, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=256, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=300, batch_size=512, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=300, batch_size=1024, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
+        train_loss = []
+        x_train = tf.data.Dataset.from_tensor_slices(self.x_train)
+        train_labels = tf.data.Dataset.from_tensor_slices(self.train_labels)
+        validation_loss = 0
+        loss_function = tf.keras.losses.get(self.autoencoder.loss)
+        trained_samples = 0
+        current_epoch = 0
+
+        for epochs_to_run, batch_size in zip(epochs, batch_sizes):
+            training_set = x_train.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
+            training_labels = train_labels.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
+
+            for epoch in range(epochs_to_run):
+                for batch in training_set:
+                    trained_samples += batch_size
+                    train_loss.append(self.autoencoder.train_on_batch(batch, batch))
+                    if trained_samples >= self.training_set_size:
+                        trained_samples = 0
+                        break
+
+                # Epoch over - get metrics
+
+                reconstruction = self.autoencoder(self.x_valid, training=False)
+                validation_loss = np.mean(loss_function(reconstruction, self.x_valid))
+                mean_train_loss = np.mean(train_loss)
+                print(
+                    f'Epoch\t{current_epoch + 1}\t\tTraining_loss:{mean_train_loss:.4f}\tValidation_loss:{validation_loss:.4f}')
+                with file_writer.as_default():
+                    tf.summary.scalar('Training loss', mean_train_loss, step=current_epoch + 1)
+                    tf.summary.scalar('Validation loss', validation_loss, step=current_epoch + 1)
+                train_loss.clear()
+
+                callback_projector.on_epoch_end(current_epoch + 1)
+                current_epoch += 1
+        callback_projector.on_train_end()
+
 
     def include_clustering_loss(self, learning_rate=0.001, loss_weights=[0.5, 0.5]):
         output_of_input = self.autoencoder.layers[0].output
@@ -134,26 +160,6 @@ class Stacked_Binner(Binner):
     def __init__(self, name, contig_ids, feature_matrix, labels=None, x_train=None,
                  x_valid=None, train_labels=None,validation_labels=None):
         super().__init__(name=name, contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels, x_train=x_train, x_valid=x_valid, train_labels=train_labels, valid_labels=validation_labels)
-
-
-        #tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
-
-        self.custom_train([1,1,1],[32,64,128],None,None)
-
-        #history = stacked_ae.fit(x_train, x_train, epochs=1, batch_size=32, validation_data=(x_valid, x_valid),
-        #                         shuffle=True, callbacks=[tensorboard_callback])
-        '''
-        history = stacked_ae.fit(x_train, x_train, epochs=100, batch_size=64, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=128, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=256, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=300, batch_size=512, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        history = stacked_ae.fit(x_train, x_train, epochs=300, batch_size=1024, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
-        '''
 
 
 
@@ -237,7 +243,7 @@ class Stacked_Binner(Binner):
             self.autoencoder = self.create_stacked_AE(self.x_train, self.x_valid, no_layers=3, no_neurons_hidden=200,
                                                        no_neurons_embedding=32, epochs=100, drop=False, bn=False,
                                                        denoise=False, regularizer=tf.keras.regularizers.l1(), lr=0.001)
-            self.pretraining(self.autoencoder, self.x_train, self.x_valid)
+            self.pretraining(epochs=[12,23,34], batch_sizes=[32, 64, 128])
             self.autoencoder.save('autoencoder.h5')
             print("AE saved")
 
@@ -260,45 +266,6 @@ class Stacked_Binner(Binner):
         self.bins = self.final_DBSCAN_clustering(eps=eps, min_samples=min_samples)
         return self.bins
 
-    def custom_train(self, epochs, batch_sizes, optimizer, lrate):
-        callback_projector = ProjectEmbeddingCallback(binner= self)
-        callback_projector.model = self
-        file_writer = tf.summary.create_file_writer(self.log_dir)
-
-        train_loss = []
-        x_train = tf.data.Dataset.from_tensor_slices(self.x_train)
-        train_labels = tf.data.Dataset.from_tensor_slices(self.train_labels)
-        validation_loss = 0
-        loss_function = tf.keras.losses.get(self.autoencoder.loss)
-        trained_samples = 0
-        current_epoch = 0
-
-        for epochs_to_run, batch_size in zip(epochs, batch_sizes):
-            training_set = x_train.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
-            training_labels = train_labels.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
-
-            for epoch in range(epochs_to_run):
-                for batch in training_set:
-                    trained_samples += batch_size
-                    train_loss.append(self.autoencoder.train_on_batch(batch, batch))
-                    if trained_samples >= self.training_set_size:
-                        trained_samples = 0
-                        break
-
-                #Epoch over - get metrics
-
-                reconstruction = self.autoencoder(self.x_valid, training=False)
-                validation_loss = np.mean(loss_function(reconstruction, self.x_valid))
-                mean_train_loss = np.mean(train_loss)
-                print(f'Epoch\t{current_epoch+1}\t\tTraining_loss:{mean_train_loss:.4f}\tValidation_loss:{validation_loss:.4f}')
-                with file_writer.as_default():
-                    tf.summary.scalar('Training loss', mean_train_loss, step=current_epoch + 1)
-                    tf.summary.scalar('Validation loss', validation_loss, step=current_epoch + 1)
-                train_loss.clear()
-
-                callback_projector.on_epoch_end(current_epoch+1)
-                current_epoch +=1
-        callback_projector.on_train_end()
 
     def fit_dbscan(self, x, y=None, batch_size=4000, epochs=10, cuda=True, eps=0.5, min_samples=10):
 
@@ -324,23 +291,9 @@ class Stacked_Binner(Binner):
 
         no_batches = len(x) / batch_size
 
-        # 1. get appropriate batch
 
-        '''Next 15 lines regarding tensorboard and callbacks are from Stack overflow user: "erenon"
-           https://stackoverflow.com/questions/44861149/keras-use-tensorboard-with-train-on-batch'''
-        # create tf callback
-
-        # embeddings_callback = keras.callbacks.LambdaCallback(on_epoch_end=tsne_embeddings)
         tensorboard.set_model(self.autoencoder)
 
-        # Transform train_on_batch return value
-        # to dict expected by on_batch_end callback
-        '''def named_logs(model, logs):
-            result = {}
-            for l in zip(model.metrics_names, logs):
-                result[l[0]] = l[1]
-            return result
-'''
         for i in range(epochs):
 
             np.random.RandomState(i).shuffle(data)
@@ -351,9 +304,7 @@ class Stacked_Binner(Binner):
             amount_batches = len(batches)
 
             print(f'Current epoch: {i + 1} of total epochs: {epochs}')
-            total_loss = 0
-            reconstruct_loss = 0
-            cluster_loss = 0
+
             for batch_no, batch in enumerate(batches):
                 batch_indices = batch_indices_list[batch_no]
                 print(f'Current batch: {batch_no + 1} of total batches: {amount_batches}')
@@ -362,39 +313,24 @@ class Stacked_Binner(Binner):
                 encoded_data_full = self.encoder.predict(data)
 
                 # 3. cluster
-                assigned_medoids_per_contig = np.zeros(encoded_data_full.shape)
-                assignments = np.zeros(len(encoded_data_full))
+
                 current_time = time.strftime('%H:%M:%S')
                 print(current_time)
 
                 dbscan_instance = DBSCAN(eps=eps, min_samples=min_samples)
-                # dbscan_instance.fit(encoded_data_full)
-                #dbscan_instance.fit(encoded_data_full)
+                dbscan_instance.fit(encoded_data_full)
 
                 # Todo this should be np array
-                #all_assignments = np.array(dbscan_instance.labels_)
-                all_assignments = np.ones(encoded_data_full.shape[0])
-                # mask = np.zeros(len(encoded_data_full), dtype=bool)
-                # mask[batch_indices_list] = True
+                all_assignments = np.array(dbscan_instance.labels_)
+
+
                 batch_assignments = np.empty(len(batch_indices))
                 for count, q in enumerate(batch_indices):
                     batch_assignments[count] = all_assignments[q]
-                # batch_assignments = tf.gather(params=all_assignments, indices=batch_indices)
 
                 batch_centroids = []
 
-                set_batch_assignments = set(batch_assignments)
                 centroid_dict = {}
-                '''
-                for cluster_label in set_batch_assignments:
-                    cluster_mask = (all_assignments == cluster_label)
-                    encoded_cluster = encoded_data_full[cluster_mask]
-                    centroid = np.mean(encoded_cluster, axis=0)
-                    centroid_dict[cluster_label] = centroid
-
-                for cluster_label in batch_assignments:
-                    batch_centroids.append(centroid_dict[cluster_label])
-                '''
 
                 for cluster_label in set(all_assignments):
                     # if outlier
@@ -440,8 +376,6 @@ class Stacked_Binner(Binner):
                 no_clusters = max(all_assignments)
                 print(f'No. clusters: {no_clusters}')
 
-                # truth_medoids = tf.gather(params=assigned_medoids_per_contig, indices=batch_indices)
-
                 list_of_losses = self.autoencoder.train_on_batch(x=[batch], y=[batch, np.array(batch_centroids)])
 
                 combined_loss.append(list_of_losses[0])
@@ -458,11 +392,6 @@ class Stacked_Binner(Binner):
 
             callback_projector.on_epoch_end(i + 1)
 
-
-            # self.tsne_embeddings(epoch=i+1,encoded_data=encoded_data_full, labels=labels, medoids=None, assignments=None)
-
-            #tensorboard.on_epoch_end(i + 1, named_logs(self.autoencoder, history_obj))
-        # self.embeddings_projector(epoch=i+1, labels=labels, assignments=all_assignments, medoids=None, encodings=encoded_data_full)
         callback_projector.on_train_end()
         tensorboard.on_train_end(None)
 
