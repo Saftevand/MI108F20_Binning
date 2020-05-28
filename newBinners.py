@@ -6,22 +6,32 @@ import tensorflow as tf
 from tensorflow import keras
 import os
 import sklearn
+from sklearn.cluster import DBSCAN
+import matplotlib.pyplot as plt
 from collections import Counter
+from tensorboard.plugins import projector
 
 class Binner(abc.ABC):
-    def __init__(self, contig_ids, feature_matrix=None, labels=None, x_train=None, x_valid=None):
-        self.feature_matrix = feature_matrix
-        self.x_train = x_train
-        self.x_valid = x_valid
+    def __init__(self, name, contig_ids, feature_matrix=None, labels=None, x_train=None, x_valid=None, train_labels=None, valid_labels=None):
+        self.input_shape = x_train.shape[1]
+        self.training_set_size = x_train.shape[0]
+        self.validation_set_size = x_valid.shape[0]
+        self.feature_matrix = tf.constant(feature_matrix)
+        self.x_train = tf.constant(x_train)
+        self.x_valid = tf.constant(x_valid)
         self.contig_ids = contig_ids
-        self.labels = labels
+        self.name = name
 
+
+        if labels is not None:
+            self.labels = tf.constant(labels)
+            self.train_labels = tf.constant(train_labels)
+            self.validation_labels = tf.constant(valid_labels)
         self.autoencoder = None
         self.encoder = None
         self.clustering_autoencoder = None
 
-        self.log_dir = os.path.join('Logs', time.strftime("run_%Y_%m_%d-%H_%M_%S"))
-
+        self.log_dir = os.path.join('Logs', f'{time.strftime("run_%Y_%m_%d-%H_%M_%S")}_{self.name}')
         self.bins = None
 
 
@@ -42,15 +52,9 @@ class Binner(abc.ABC):
         input = self.autoencoder.get_layer('input').output
         latent_output = self.autoencoder.get_layer('latent_layer').output
         encoder = keras.Model(input, latent_output, name="encoder")
-        print(encoder.summary())
+        #print(encoder.summary())
         return encoder
 
-    def extract_clustering_encoder(self):
-        input = self.clustering_autoencoder.get_layer('input').output
-        latent_output = self.clustering_autoencoder.get_layer('latent_layer').output
-        encoder = keras.Model(input, latent_output, name="encoder")
-        print(encoder.summary())
-        return encoder
 
     def include_clustering_loss(self, learning_rate=0.001, loss_weights=[0.5, 0.5]):
         output_of_input = self.autoencoder.layers[0].output
@@ -62,12 +66,6 @@ class Binner(abc.ABC):
 
         opt = keras.optimizers.Adam(learning_rate=learning_rate)
 
-        def cosine_dist(y_true, y_pred):
-            losses = tf.keras.losses.CosineSimilarity(axis=1)(y_true, y_pred)
-
-            return tf.abs(losses)
-
-        # , loss_weights=[0., 1.]
         rerouted_autoencoder.compile(optimizer=opt, loss=['mse', 'mse'], loss_weights=loss_weights)
 
         print(rerouted_autoencoder.summary())
@@ -86,16 +84,19 @@ class Binner(abc.ABC):
 
 class Stacked_Binner(Binner):
 
-    def __init__(self, contig_ids, feature_matrix, labels=None, x_train=None,
-                 x_valid=None):
-        super().__init__(contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels, x_train=x_train, x_valid=x_valid)
+    def __init__(self, name, contig_ids, feature_matrix, labels=None, x_train=None,
+                 x_valid=None, train_labels=None,validation_labels=None):
+        super().__init__(name=name, contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels, x_train=x_train, x_valid=x_valid, train_labels=train_labels, valid_labels=validation_labels)
 
     def pretraining(self, stacked_ae, x_train, x_valid):
 
-        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
+        #tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
 
-        history = stacked_ae.fit(x_train, x_train, epochs=50, batch_size=32, validation_data=(x_valid, x_valid),
-                                 shuffle=True, callbacks=[tensorboard_callback])
+        self.custom_train([1,1,1],[32,64,128],None,None)
+
+        #history = stacked_ae.fit(x_train, x_train, epochs=1, batch_size=32, validation_data=(x_valid, x_valid),
+        #                         shuffle=True, callbacks=[tensorboard_callback])
+        '''
         history = stacked_ae.fit(x_train, x_train, epochs=100, batch_size=64, validation_data=(x_valid, x_valid),
                                  shuffle=True, callbacks=[tensorboard_callback])
         history = stacked_ae.fit(x_train, x_train, epochs=150, batch_size=128, validation_data=(x_valid, x_valid),
@@ -106,6 +107,9 @@ class Stacked_Binner(Binner):
                                  shuffle=True, callbacks=[tensorboard_callback])
         history = stacked_ae.fit(x_train, x_train, epochs=300, batch_size=1024, validation_data=(x_valid, x_valid),
                                  shuffle=True, callbacks=[tensorboard_callback])
+        '''
+
+
 
     def create_stacked_AE(self, x_train, x_valid, no_layers=3, no_neurons_hidden=200,
                                                        no_neurons_embedding=32, epochs=100, drop=False, bn=False,
@@ -115,7 +119,7 @@ class Stacked_Binner(Binner):
             return
 
         # split data
-        input_shape = x_train.shape[1]
+        input_shape = self.input_shape
         activation_fn = 'elu'
         init_fn = 'he_normal'
         # regularizer = tf.keras.regularizers.l2()
@@ -199,18 +203,66 @@ class Stacked_Binner(Binner):
         eps=1
         min_samples=4
         if load_clustering_AE:
-            self.clustering_autoencoder = tf.keras.models.load_model("clustering_AE.h5")
-            self.encoder = self.extract_clustering_encoder()
+            self.autoencoder = tf.keras.models.load_model("clustering_AE.h5")
+            self.encoder = self.extract_encoder()
         else:
-            self.clustering_autoencoder = self.include_clustering_loss(learning_rate=0.0001, loss_weights=[1, 0.05])
-            self.fit_dbscan(self.feature_matrix, y=self.labels, batch_size=4000, epochs=1, cuda=True, eps=eps, min_samples=min_samples)
-            self.clustering_autoencoder.save('clustering_AE.h5')
+            self.autoencoder = self.include_clustering_loss(learning_rate=0.0001, loss_weights=[1, 0.05])
+            self.fit_dbscan(self.feature_matrix, y=self.labels, batch_size=4000, epochs=20, cuda=True, eps=eps, min_samples=min_samples)
+            self.autoencoder.save('clustering_autoencoder.h5')
             print("clustering_AE saved")
 
         self.bins = self.final_DBSCAN_clustering(eps=eps, min_samples=min_samples)
         return self.bins
 
+    def custom_train(self, epochs, batch_sizes, optimizer, lrate):
+        callback_projector = ProjectEmbeddingCallback(binner= self)
+        callback_projector.model = self
+        file_writer = tf.summary.create_file_writer(self.log_dir)
+
+        train_loss = []
+        x_train = tf.data.Dataset.from_tensor_slices(self.x_train)
+        train_labels = tf.data.Dataset.from_tensor_slices(self.train_labels)
+        validation_loss = 0
+        loss_function = tf.keras.losses.get(self.autoencoder.loss)
+        trained_samples = 0
+        current_epoch = 0
+
+        for epochs_to_run, batch_size in zip(epochs, batch_sizes):
+            training_set = x_train.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
+            training_labels = train_labels.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
+
+            for epoch in range(epochs_to_run):
+                for batch in training_set:
+                    trained_samples += batch_size
+                    train_loss.append(self.autoencoder.train_on_batch(batch, batch))
+                    if trained_samples >= self.training_set_size:
+                        trained_samples = 0
+                        break
+
+                #Epoch over - get metrics
+
+                reconstruction = self.autoencoder(self.x_valid, training=False)
+                validation_loss = np.mean(loss_function(reconstruction, self.x_valid))
+                mean_train_loss = np.mean(train_loss)
+                print(f'Epoch\t{current_epoch+1}\t\tTraining_loss:{mean_train_loss:.4f}\tValidation_loss:{validation_loss:.4f}')
+                with file_writer.as_default():
+                    tf.summary.scalar('Training loss', mean_train_loss, step=current_epoch + 1)
+                    tf.summary.scalar('Validation loss', validation_loss, step=current_epoch + 1)
+                train_loss.clear()
+
+                callback_projector.on_epoch_end(current_epoch+1)
+                current_epoch +=1
+        callback_projector.on_train_end()
+
     def fit_dbscan(self, x, y=None, batch_size=4000, epochs=10, cuda=True, eps=0.5, min_samples=10):
+
+        callback_projector = ProjectEmbeddingCallback(binner=self, log_dir=os.path.join(self.log_dir,'DeepClustering'))
+        callback_projector.model = self
+        file_writer = tf.summary.create_file_writer(self.log_dir)
+
+        reconstruction_loss = []
+        clustering_loss = []
+        combined_loss = []
 
         tensorboard = keras.callbacks.TensorBoard(
             log_dir=self.log_dir,
@@ -221,7 +273,7 @@ class Stacked_Binner(Binner):
         )
 
         data = np.copy(x)
-        labels = y
+        labels = y.numpy()
         indices = np.arange(len(data))
 
         no_batches = len(x) / batch_size
@@ -237,12 +289,12 @@ class Stacked_Binner(Binner):
 
         # Transform train_on_batch return value
         # to dict expected by on_batch_end callback
-        def named_logs(model, logs):
+        '''def named_logs(model, logs):
             result = {}
             for l in zip(model.metrics_names, logs):
                 result[l[0]] = l[1]
             return result
-
+'''
         for i in range(epochs):
 
             np.random.RandomState(i).shuffle(data)
@@ -269,14 +321,13 @@ class Stacked_Binner(Binner):
                 current_time = time.strftime('%H:%M:%S')
                 print(current_time)
 
-                dbscan_instance = sklearn.cluster.DBSCAN(eps=eps, min_samples=min_samples)
-
+                dbscan_instance = DBSCAN(eps=eps, min_samples=min_samples)
                 # dbscan_instance.fit(encoded_data_full)
-                dbscan_instance.fit(encoded_data_full)
+                #dbscan_instance.fit(encoded_data_full)
 
                 # Todo this should be np array
-                all_assignments = np.array(dbscan_instance.labels_)
-
+                #all_assignments = np.array(dbscan_instance.labels_)
+                all_assignments = np.ones(encoded_data_full.shape[0])
                 # mask = np.zeros(len(encoded_data_full), dtype=bool)
                 # mask[batch_indices_list] = True
                 batch_assignments = np.empty(len(batch_indices))
@@ -345,40 +396,164 @@ class Stacked_Binner(Binner):
 
                 # truth_medoids = tf.gather(params=assigned_medoids_per_contig, indices=batch_indices)
 
-                list_of_losses = self.clustering_autoencoder.train_on_batch(x=[batch], y=[batch, np.array(batch_centroids)])
-                # print(self.autoencoder.metrics_names)
-                # print(list_of_losses)
+                list_of_losses = self.autoencoder.train_on_batch(x=[batch], y=[batch, np.array(batch_centroids)])
 
-                total_loss += list_of_losses[0]
-                reconstruct_loss += list_of_losses[1]
-                cluster_loss += list_of_losses[2]
+                combined_loss.append(list_of_losses[0])
+                reconstruction_loss.append(list_of_losses[1])
+                clustering_loss.append(list_of_losses[2])
 
-            history_obj = list()
-            tot_avg = total_loss / amount_batches
-            history_obj.append(tot_avg)
+            print(
+                f'Epoch\t{i + 1}\t\tReconstruction_loss:{np.mean(reconstruction_loss):.4f}\tClustering_loss:{np.mean(clustering_loss):.4f}\tTotal_loss:{np.mean(combined_loss):.4f}')
+            with file_writer.as_default():
+                tf.summary.scalar('Reconstruction loss', np.mean(reconstruction_loss), step=i + 1)
+                tf.summary.scalar('Clustering loss', np.mean(clustering_loss), step=i + 1)
+                tf.summary.scalar('Total loss', np.mean(combined_loss), step=i + 1)
+            reconstruction_loss.clear(), clustering_loss.clear(), combined_loss.clear()
 
-            recon_avg = reconstruct_loss / amount_batches
-            history_obj.append(recon_avg)
+            callback_projector.on_epoch_end(i + 1)
 
-            clust_avg = cluster_loss / amount_batches
-            history_obj.append(clust_avg)
-
-            print(f'Total loss: {tot_avg}, \t Reconst loss: {recon_avg}, \t Clust loss: {clust_avg}')
 
             # self.tsne_embeddings(epoch=i+1,encoded_data=encoded_data_full, labels=labels, medoids=None, assignments=None)
 
-            tensorboard.on_epoch_end(i + 1, named_logs(self.autoencoder, history_obj))
+            #tensorboard.on_epoch_end(i + 1, named_logs(self.autoencoder, history_obj))
         # self.embeddings_projector(epoch=i+1, labels=labels, assignments=all_assignments, medoids=None, encodings=encoded_data_full)
+        callback_projector.on_train_end()
         tensorboard.on_train_end(None)
 
+def print_status_bar(iteration, total, loss, metrics=None):
+    metrics = " - ".join(["{}: {:.4f}".format(m.name, m.result()) for m in [loss] + (metrics or [])])
+    end = "" if iteration < total else "\n"
+    print("\r{}/{} - ".format(iteration, total) + metrics, end=end)
 
-def create_binner(binner_type, contig_ids, feature_matrix, labels=None, x_train=None, x_valid=None ):
-    binner_type = binner_dict[binner_type]
 
-    binner_instance = binner_type(contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels,
-                                  x_train=x_train, x_valid=x_valid)
+
+def create_binner(binner_type, contig_ids, feature_matrix, labels=None, x_train=None, x_valid=None, train_labels=None,validation_labels=None ):
+    binner = binner_dict[binner_type]
+
+    binner_instance = binner(name=binner_type, contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels,
+                                  x_train=x_train, x_valid=x_valid,train_labels=train_labels, validation_labels=validation_labels)
     return binner_instance
 
 binner_dict = {
     'STACKED': Stacked_Binner,
 }
+
+class ProjectEmbeddingCallback(tf.keras.callbacks.Callback):
+
+    def __init__(self, binner, log_dir=None, project_every_modulo=10):
+        super().__init__()
+        self.binner = binner
+        if log_dir == None:
+            self.log_dir = self.binner.log_dir
+        else:
+            self.log_dir = log_dir
+        self.project_every_modulo = project_every_modulo
+        self.embeddings = []
+        self.config = projector.ProjectorConfig()
+
+    def on_epoch_end(self, epoch, logs=None):
+        if epoch % self.project_every_modulo == 0:
+            embeddings = self.binner.extract_encoder()(self.binner.feature_matrix)
+            data_to_project = self.project_data(embedding=embeddings, epoch=epoch)
+            data_variable = tf.Variable(data_to_project, name=f'epoch{epoch}')
+            self.embeddings.append(data_variable)
+    def on_train_end(self, logs=None):
+        if len(self.embeddings) != 0:
+            saver = tf.compat.v1.train.Saver(var_list=self.embeddings, save_relative_paths=True)
+            saver.save(None, os.path.join(self.log_dir, 'embeddings.ckpt'))
+            for e in self.embeddings:
+                embedding = self.config.embeddings.add()
+                embedding.tensor_name = e.name
+                embedding.metadata_path = "metadata.tsv"
+                projector.visualize_embeddings(self.log_dir, self.config)
+
+
+
+    def project_data(self, embedding, bins_to_plot=10, run_on_all_data=False,
+                     number_components=10, epoch=-1):
+
+        number_of_contigs = embedding.shape[0]
+        labels = self.binner.labels.numpy()
+        counter = Counter(labels)
+        # bins_atleast_10_contigs = [key for key, val in counter.items() if val >= 10]
+
+        sorted_by_count = sorted(list(counter.items()), key=lambda x: x[1], reverse=True)
+        samples_of_bins = [fst for fst, snd in sorted_by_count[1:11]]
+        # samples_of_bins = random.choices(bins_atleast_10_contigs, k=bins_to_plot)
+
+        if run_on_all_data:
+            pca = decomposition.PCA(n_components=number_components)
+            pca.fit(embedding)
+            data_to_project = pca.transform(embedding)
+            plt.scatter(data_to_project[:, 0], data_to_project[:, 1])
+
+            with open(os.path.join(self.binner.log_dir, 'metadata.tsv'), "w") as f:
+                for _, bin_id in self.assignments.items():
+                    if bin_id in samples_of_bins:
+                        f.write(f'{bin_id}\n')
+                    else:
+                        f.write(f'-1\n')
+        else:
+            mask = np.zeros(number_of_contigs, dtype=bool)
+
+            if os.path.exists(os.path.join(self.binner.log_dir, 'metadata.tsv')):
+                for (contig_idx, bin_id) in zip(range(number_of_contigs), labels):
+                    if bin_id in samples_of_bins:
+                        mask[contig_idx] = True
+            # with open(os.path.join(log_dir, 'metadata.tsv'), "w") as f:
+            else:
+                with open(os.path.join(self.binner.log_dir, 'metadata.tsv'), "w") as f:
+                    for (contig_idx, bin_id) in zip(range(number_of_contigs), labels):
+                        if bin_id in samples_of_bins:
+                            mask[contig_idx] = True
+                            f.write(f'{bin_id}\n')
+
+            data_to_project = embedding[mask]
+            #pca = decomposition.PCA(n_components=number_components)
+            #pca.fit(data_to_project)
+            #data_to_project = pca.transform(data_to_project)
+            #sns.scatterplot(data_to_project[:, 0], data_to_project[:, 1])
+            #plt.show()
+
+        #variance_of_components = pca.explained_variance_ratio_
+
+        return data_to_project
+
+
+class ActivityCallback(tf.keras.callbacks.Callback):
+
+    def __init__(self, training_data):
+        self.training_data = training_data
+        super().__init__()
+
+    def on_epoch_end(self, epoch, logs=None):
+        encoder = self.model.get_layer('Encoder')
+        activations = encoder.predict(self.training_data)
+        activations_flatten = activations.flatten()
+        #activations_percentages = activations.flatten()/activations.size
+        number_of_activations = activations.size
+        fig, ax = plt.subplots()
+        y_vals, x_vals, e_ = ax.hist(activations_flatten, edgecolor='black')
+        ax.set_title("Embedding activations")
+        ax.set_xlabel("Activations")
+        ax.set_ylabel("% Activation")
+
+        y_max = round((max(y_vals) / number_of_activations) + 0.01, 2)
+        y_max = 1
+        ax.set_yticks(ticks=np.arange(0.0, y_max * number_of_activations, 0.1 * number_of_activations,))
+        ax.set_ylim(ax.get_yticks()[0], ax.get_yticks()[-1])
+        ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=number_of_activations))
+        plt.show()
+
+        mean_activities = tf.reduce_mean(activations, axis=0).numpy()
+        number_neurons = mean_activities.size
+        fig, ax = plt.subplots()
+        y_vals, x_vals, e_ = ax.hist(mean_activities, edgecolor='black')
+        ax.set_title("Activity neuron")
+        ax.set_xlabel("Neuron Mean Activation")
+        ax.set_ylabel("% Neurons")
+        y_max = round((max(y_vals) / number_neurons) + 0.01, 2)
+        ax.set_yticks(ticks=np.arange(0.0, y_max * number_neurons, 0.05 * number_neurons, ))
+        ax.set_ylim(ax.get_yticks()[0], ax.get_yticks()[-1])
+        ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=number_neurons))
+        plt.show()

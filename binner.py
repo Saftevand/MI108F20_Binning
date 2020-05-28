@@ -10,12 +10,12 @@ import sklearn
 from sklearn import datasets, preprocessing
 import time
 import matplotlib.pyplot as plt
-import cudf
+#import cudf
 import io
-from cuml import TSNE
+#from cuml import TSNE
 from cuml.cluster import DBSCAN
 import sys
-import vamb_clust
+#import vamb_clust
 from itertools import cycle, islice
 import os
 from collections import Counter

@@ -3,8 +3,8 @@ from random import randint
 import math
 import pandas as pd
 import abc
-import cuml
-import cudf
+#import cuml
+#import cudf
 import sklearn
 
 
@@ -146,7 +146,7 @@ class clustering_k_means(clustering_method):
         self.clustered_data = result
         return self.clustered_data
 '''
-
+'''
 class DBSCAN_GPU(clustering_method):
     def __init__(self, eps=1.0, min_samples=5): #eps skal være en float værdi
         super().__init__()
@@ -175,3 +175,4 @@ class KMEANS_GPU(clustering_method):
 
     def get_loss(self):
         return None
+'''

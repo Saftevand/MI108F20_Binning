@@ -1,15 +1,16 @@
-import vamb
+#import vamb
 import numpy as np
 from sklearn.preprocessing import normalize
+import os
 import math
 import datetime
 from collections import defaultdict
-import cuml
-import cudf
+#import cuml
+#import cudf
 import pandas as pd
-import binner
+#import binner
 from sklearn.model_selection import train_test_split
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 def get_tnfs(path):
     with vamb.vambtools.Reader(path, 'rb') as filehandle:
@@ -84,7 +85,6 @@ def write_training_plots(binner_instance, out_dir):
         plt.close(plot1)
 
 
-
 def get_depth(paths):
     return vamb.parsebam.read_bamfiles(paths)
 
@@ -118,7 +118,7 @@ def get_featurematrix(args):
 
     return feature_matrix, contig_ids, x_train, x_valid
 
-def preprocess_data(tnfs, depths):
+def preprocess_data(tnfs, depths, labels=None):
 
     tnf_shape = tnfs.shape[1]
     depth_shape = depths.shape[1]
@@ -130,7 +130,7 @@ def preprocess_data(tnfs, depths):
 
     # feature_matrix = np.hstack([weighted_tnfs, weighted_depths])
     feature_matrix = np.hstack([tnfs, depths])
-    x_train, x_valid = train_test_split(feature_matrix, test_size=0.2, shuffle=True)
+    x_train, x_valid, train_labels, validation_labels = train_test_split(feature_matrix, labels, test_size=0.2, shuffle=True,)
     training_mean = np.mean(x_train, axis=0)
     training_std = np.std(feature_matrix, axis=0)
 
@@ -141,7 +141,8 @@ def preprocess_data(tnfs, depths):
     x_valid /= training_std
     feature_matrix -= training_mean
     feature_matrix /= training_std
-    return feature_matrix, x_train, x_valid
+    return feature_matrix, x_train, x_valid, train_labels, validation_labels
+
 
 def get_train_and_validation_data(feature_matrix, split_value=0.8):
     # TODO måske skal ham her være lidt bedre. Det er farligt at tage de første x % hver gang
@@ -167,6 +168,7 @@ def get_train_and_test_data(data, split_value=0.8):
     x_train, x_test, y_train, y_test = cuml.model_selection.train_test_split(data, 'y', train_size=split_value)  # tror y her skal være den ene dimension i datasettet
     return x_train, x_test, y_train, y_test
 
+
 def np2cudf(df):
     # convert numpy array to cuDF dataframe
     df = pd.DataFrame({'fea%d'%i:df[:,i] for i in range(df.shape[1])})
@@ -174,6 +176,7 @@ def np2cudf(df):
     for c,column in enumerate(df):
       pdf[str(c)] = df[column]
     return pdf
+
 
 def get_cami_data_truth(path):
     with open(path, 'r') as input_file:
@@ -185,6 +188,7 @@ def get_cami_data_truth(path):
         contig_ids = []
         binid_to_int = defaultdict()
         contigid_to_binid = defaultdict()
+        bin_id_to_contig_names = defaultdict(list)
 
         new_id = 0
         for line in input_file:
@@ -210,7 +214,20 @@ def get_cami_data_truth(path):
 
             ids.append(id_int)
 
-    return ids, contig_ids, contigid_to_binid
+    for contig_name, binid in contigid_to_binid.items():
+        bin_id_to_contig_names[binid].append(contig_name)
+    d = {int(k.split("|C")[1]): int(v) for k, v in contigid_to_binid.items()}
+    contig_id_binid_sorted = dict(sorted(d.items()))
+    return ids, contig_ids, contigid_to_binid, contig_id_binid_sorted
+
+
+def load_data_local(dataset_path):
+
+    dataset_path = dataset_path
+    tnfs = np.load(os.path.join(dataset_path, "tnfs_high.npy"))
+    contig_ids = np.load(os.path.join(dataset_path, "contig_ids_high.npy"))
+    depth = np.load(os.path.join(dataset_path, "depths_high.npy"))
+    return tnfs, contig_ids, depth
 
 
 def sort_bins_follow_input(contig_ids: [int], contig_to_bin_id: defaultdict):
