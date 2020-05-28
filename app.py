@@ -46,51 +46,54 @@ def main():
 
     # DETTE SKULLE GERNE LÆSE DATA FRA CAMI BINS OG ARRANGE DATA ???????????
     print("Getting true bins")
-    path = 'D:\datasets\cami_high\gsa_mapping_pool.binning'
-    true_bins, contig_ids_true, contig_to_bin_id = data_processor.get_cami_data_truth(path)
+    path = '/mnt/cami_high/gsa_mapping_pool.binning'
+    ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(path)
 
-    labels = data_processor.sort_bins_follow_input(contig_ids_true, contig_to_bin_id)
-    print(f'True bins:  {true_bins[:100]}')
+    labels = list(contig_id_binid_sorted.values())
+
     print("Starting binning process")
 
     args = handle_input_arguments()
     tb = program.TensorBoard()
-    tb.configure(argv=[None, '--logdir', 'D:\datasets\cami_high', '--host', '0.0.0.0', '--port', '13337'])
+    tb.configure(argv=[None, '--logdir', args.outdir, '--host', '0.0.0.0', '--port', '13337'])
     url = tb.launch()
-    #print(args)
-    #   TODO    calc methyl
 
-    #binid_to_int = data_processor.get_unique_ids_truth('/mnt/cami_high/gsa_mapping_pool.binning')
-
-    #print(len(binid_to_int.keys()))
-
-
-
-    feature_matrix, contig_ids, x_train, x_valid = data_processor.get_featurematrix(args)
+    feature_matrix, contig_ids, x_train, x_valid , train_labels, validation_labels = data_processor.get_featurematrix(args, labels)
 
     pretrain_params = {
         'learning_rate': 0.001,
+        'reconst_loss': 'mae',
         'layer_size': 200,
         'num_hidden_layers': 3,
         'embedding_neurons': 32,
+        'epochs': [100, 100, 150, 150],
+        'batch_sizes': [32, 64, 128, 256],
         'activation_fn': 'elu',
         'regularizer': None,
+        'initializer': 'he_normal',
         'denoise': False,
         'dropout': False,
+        'drop_and_denoise_rate': 0.2,
         'BN': False,
+        'sparseKLweight': 0.5,
+        'sparseKLtarget': 0.1
     }
     clust_params = {
         'learning_rate': 0.0001,
         'loss_weights': [1, 0.05],  # [reconstruction, clustering]
         'batch_size': 4000,
         'epochs': 10,
+        'reconst_loss': 'mse',
+        'clust_loss': 'mse',
         'cuda': True,
         'eps': 0.5,
         'min_samples': 10
     }
 
     binner_instance = newBinners.create_binner(binner_type=args.binnertype, feature_matrix=feature_matrix,
-                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid)
+                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid,
+                                               train_labels=train_labels, validation_labels=validation_labels,
+                                               pretraining_params=pretrain_params, clust_params=clust_params)
 
     binner_instance.do_binning(load_model=True, load_clustering_AE=False)
 
@@ -148,8 +151,8 @@ def handle_input_arguments():
 
 if __name__ == '__main__':
     _multiprocessing.freeze_support()  # Skal være her så længe at vi bruger vambs metode til at finde depth
-    run_on_windows()
-    #main()
+    #run_on_windows()
+    main()
 
     '''
     binner_ = binner.Binner(autoencoder=autoencoders.DEC_greedy_autoencoder(train=None, valid=None), clustering_method= clustering_methods.clustering_k_means())

@@ -89,7 +89,7 @@ def get_depth(paths):
     return vamb.parsebam.read_bamfiles(paths)
 
 
-def get_featurematrix(args):
+def get_featurematrix(args, labels=None):
 
     if args.bam:
         depth = get_depth(args.bam)
@@ -112,11 +112,11 @@ def get_featurematrix(args):
     if args.savepathdepth:
         np.save(args.savepathdepth +"depth", depth)
 
-    feature_matrix, x_train, x_valid = preprocess_data(tnfs, depth)
+    feature_matrix, x_train, x_valid, train_labels, validation_labels = preprocess_data(tnfs, depth, labels)
     #feature_matrix = np.hstack([tnfs, depth])
     #np.save("full_feature_matrix", feature_matrix)
 
-    return feature_matrix, contig_ids, x_train, x_valid
+    return feature_matrix, contig_ids, x_train, x_valid, train_labels, validation_labels
 
 def preprocess_data(tnfs, depths, labels=None):
 
