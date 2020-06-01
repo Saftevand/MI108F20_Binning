@@ -286,22 +286,23 @@ class Stacked_Binner(Binner):
 
         else:
             self.autoencoder = self.create_autoencoder()
+            self.encoder = self.extract_encoder()
+            print(self.encoder)
             callback_projector = ProjectEmbeddingCallback(binner=self)
             callback_activity = ActivityCallback(binner=self)
             callback_results = WriteBinsCallback(binner=self)
 
             self.pretraining(callbacks=[callback_projector, callback_activity, callback_results])
-            self.encoder = self.extract_encoder()
 
         if load_clustering_AE:
             self.load_model()
         else:
-            self.autoencoder = self.include_clustering_loss()
-            self.encoder = self.extract_encoder()
-            callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
+            #self.autoencoder = self.include_clustering_loss()
+            #self.encoder = self.extract_encoder()
+            #callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
             #callback_projector.prefix_name = 'DeepClustering_'
-            self.fit_clustering([callback_results])
-            #print("clustering_AE saved")
+            #self.fit_clustering([callback_results])
+            print("Completing...")
 
         return self.bins
 
@@ -808,7 +809,7 @@ class ProjectEmbeddingCallback(tf.keras.callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         print("Entered project callback")
-        embeddings = self.binner.extract_encoder()(self.binner.feature_matrix)
+        embeddings = self.binner.encoder(self.binner.feature_matrix)
         data_to_project = self.project_data(embedding=embeddings, epoch=epoch)
         print("Ran project data")
         data_variable = tf.Variable(data_to_project, name=f'{self.prefix_name}epoch{epoch}')

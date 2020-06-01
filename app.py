@@ -65,14 +65,14 @@ def run_on_windows(config, pretraining_params, clust_param):
         pretraining_params, clustering_params = load_training_config(config)
 
 
-    dataset_path = '/home/binning/datasets/cami_high'
+    dataset_path = '/home/SimonLinnebjerg/datasets/cami_high'
     tnfs, contig_ids, depth = data_processor.load_data_local(dataset_path)
     ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
         os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
     labels = list(contig_id_binid_sorted.values())
     feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels)
 
-    binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix,
+    binner_instance = newBinners.create_binner(binner_type='SPARSE', feature_matrix=feature_matrix,
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid ,train_labels=train_labels, validation_labels=validation_labels, clust_params=clustering_params, pretraining_params=pretraining_params)
 
 
