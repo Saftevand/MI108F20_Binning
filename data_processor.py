@@ -7,7 +7,7 @@ import datetime
 from collections import defaultdict
 #import cuml
 #import cudf
-import pandas as pd
+#import pandas as pd
 #import binner
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
@@ -130,7 +130,7 @@ def preprocess_data(tnfs, depths, labels=None):
 
     # feature_matrix = np.hstack([weighted_tnfs, weighted_depths])
     feature_matrix = np.hstack([tnfs, depths])
-    x_train, x_valid, train_labels, validation_labels = train_test_split(feature_matrix, labels, test_size=0.2, shuffle=True,)
+    x_train, x_valid, train_labels, validation_labels = train_test_split(feature_matrix, labels, test_size=0.2, shuffle=True,random_state=2)
     training_mean = np.mean(x_train, axis=0)
     training_std = np.std(feature_matrix, axis=0)
 
@@ -152,16 +152,16 @@ def get_train_and_validation_data(feature_matrix, split_value=0.8):
     return train, validate
 
 
-def write_bins_to_file(bins):
-    bins_string = '@Version:0.9.1\n@SampleID:gsa\n\n@@SEQUENCEID\tBINID\tLENGTH\n'
+def write_bins_to_file(bins, output_dir=''):
 
-    print(bins)
+    output_string = '@Version:0.9.1\n@SampleID:gsa\n\n@@SEQUENCEID\tBINID\tLENGTH\n'
 
     for i in range(0, len(bins[0])):
-        bins_string += f'{bins[0][i]}\t{bins[1][i]}\n'
 
-    with open('binning_results.tsv', 'w') as output:
-        output.write(bins_string)
+        output_string += f'{bins[0][i]}\t{bins[1][i]}\n'
+
+    with open((output_dir + 'binning_results.tsv'), 'w') as output:
+        output.write(output_string)
 
 
 def get_train_and_test_data(data, split_value=0.8):
@@ -169,14 +169,14 @@ def get_train_and_test_data(data, split_value=0.8):
     return x_train, x_test, y_train, y_test
 
 
-def np2cudf(df):
+'''def np2cudf(df):
     # convert numpy array to cuDF dataframe
     df = pd.DataFrame({'fea%d'%i:df[:,i] for i in range(df.shape[1])})
     pdf = cudf.DataFrame()
     for c,column in enumerate(df):
       pdf[str(c)] = df[column]
     return pdf
-
+'''
 
 def get_cami_data_truth(path):
     with open(path, 'r') as input_file:

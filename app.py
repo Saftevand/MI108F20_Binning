@@ -3,19 +3,69 @@ import multiprocessing as _multiprocessing
 #import binner
 import argparse
 import data_processor
+import hdbscan
+import glob
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
-import clustering_methods
+#import clustering_methods
+import sys
+import json
 from tensorboard import program
 from pathlib import Path
 import newBinners
 import os
+import matplotlib
+matplotlib.use('Agg')
+
+pretrain_params = {
+        'learning_rate': 0.001,
+        'reconst_loss': 'mae',
+        'layer_size': 200,
+        'num_hidden_layers': 4,
+        'embedding_neurons': 32,
+        'epochs': [200, 800, 3000],
+        'batch_sizes': [256, 512, 4096],
+        'activation_fn': 'elu',
+        'regularizer': None,
+        'initializer': 'he_normal',
+        'optimizer': 'Adam',
+        'denoise': False,
+        'dropout': True,
+        'drop_and_denoise_rate': 0.5,
+        'BN': False,
+        'sparseKLweight': 0.8,
+        'sparseKLtarget': 0.1,
+        'jacobian_weight': 1e-4,
+        'callback_interval': 1000
+    }
+clust_params = {
+    'learning_rate': 0.001,
+    'optimizer': 'Adam',
+    'loss_weights': [1, 0.05],  # [reconstruction, clustering]
+    'jacobian_weight': 1e-4,
+    'clustering_weight': 0.05,
+    'epochs': 100,
+    'reconst_loss': 'mae',
+    'clust_loss': 'mae',
+    'cuda': True,
+    'eps': 0.5,
+    'min_samples': 2,
+    'min_cluster_size': 6,
+    'callback_interval': 5
+}
+
+def run_on_windows(config, pretraining_params, clust_param):
 
 
-def run_on_windows():
+    pretraining_params = pretraining_params
+    clustering_params = clust_param
 
-    dataset_path = 'D:\datasets\cami_high'
+    if config:
+        pretraining_params, clustering_params = load_training_config(config)
+
+
+    dataset_path = '/home/binning/datasets/cami_high'
     tnfs, contig_ids, depth = data_processor.load_data_local(dataset_path)
     ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
         os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
@@ -23,15 +73,42 @@ def run_on_windows():
     feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels)
 
     binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix,
-                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid ,train_labels=train_labels, validation_labels=validation_labels)
+                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid ,train_labels=train_labels, validation_labels=validation_labels, clust_params=clustering_params, pretraining_params=pretraining_params)
+
 
     binner_instance.do_binning(load_model=False, load_clustering_AE=False)
 
-    results = binner_instance.get_assignments()
+    #bins = binner_instance.get_assignments(include_outliers=False)
+    #data_processor.write_bins_to_file(bins)
+    run_amber(binner_instance.log_dir)
 
-    data_processor.write_bins_to_file(results)
+    #run_amber('/home/binning/MI108F20_Binning/Logs/run_2020_06_01-11_59_12_STACKED/')
 
 
+def load_training_config(config_path):
+    with open(config_path, 'r') as config:
+        params = json.load(config)
+        return params['pretraining_params'], params['clust_params']
+
+
+def run_amber(path):
+    directory_of_files = os.path.join(os.path.abspath(path), "*binning_results.tsv")
+    labels = glob.glob(directory_of_files)
+    labels = [label.split('/')[-1].split('binning')[0] for label in labels]
+    paths_to_results = [os.path.abspath(x) for x in glob.glob(directory_of_files)]
+    gold_standard_file = os.path.abspath('ground_truth_with_length.tsv')
+    unique_common_file = os.path.abspath('unique_common.tsv')
+    outdir_with_circular = os.path.join(path, 'amber_with_circular')
+    outdir_without_circular = os.path.join(path, 'amber_without_circular')
+    command_amber_without_circular = f'amber.py -g {gold_standard_file} -l "{", ".join(labels)}" -r {unique_common_file} -k "circular element" {" ".join(paths_to_results)} -o {outdir_without_circular}'
+    command_amber_with_circular = f'amber.py -g {gold_standard_file} -l "{", ".join(labels)}" {" ".join(paths_to_results)} -o {outdir_with_circular}'
+    os.system(command_amber_with_circular)
+    os.system(command_amber_without_circular)
+
+def hdbscan_non_embedded_data(data, binner):
+    hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=clust_params['min_cluster_size'], min_samples=clust_params['min_samples'], core_dist_n_jobs=36)
+    all_assignments = hdbscan_instance.fit_predict(data)
+    binner.bins = all_assignments
 
 
 def main():
@@ -60,42 +137,14 @@ def main():
 
     feature_matrix, contig_ids, x_train, x_valid , train_labels, validation_labels = data_processor.get_featurematrix(args, labels)
 
-    pretrain_params = {
-        'learning_rate': 0.001,
-        'reconst_loss': 'mae',
-        'layer_size': 200,
-        'num_hidden_layers': 3,
-        'embedding_neurons': 32,
-        'epochs': [100, 100, 150, 150],
-        'batch_sizes': [32, 64, 128, 256],
-        'activation_fn': 'elu',
-        'regularizer': None,
-        'initializer': 'he_normal',
-        'denoise': False,
-        'dropout': False,
-        'drop_and_denoise_rate': 0.2,
-        'BN': False,
-        'sparseKLweight': 0.5,
-        'sparseKLtarget': 0.1
-    }
-    clust_params = {
-        'learning_rate': 0.0001,
-        'loss_weights': [1, 0.05],  # [reconstruction, clustering]
-        'batch_size': 4000,
-        'epochs': 10,
-        'reconst_loss': 'mse',
-        'clust_loss': 'mse',
-        'cuda': True,
-        'eps': 0.5,
-        'min_samples': 10
-    }
+
 
     binner_instance = newBinners.create_binner(binner_type=args.binnertype, feature_matrix=feature_matrix,
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid,
                                                train_labels=train_labels, validation_labels=validation_labels,
                                                pretraining_params=pretrain_params, clust_params=clust_params)
 
-    binner_instance.do_binning(load_model=True, load_clustering_AE=False)
+    binner_instance.do_binning(load_model=True, load_clustering_AE=True)
 
     results = binner_instance.get_assignments()
 
@@ -151,8 +200,12 @@ def handle_input_arguments():
 
 if __name__ == '__main__':
     _multiprocessing.freeze_support()  # Skal være her så længe at vi bruger vambs metode til at finde depth
-    #run_on_windows()
-    main()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-c", "--config", help="Path to config file")
+    args = parser.parse_args()
+    run_on_windows(args.config, pretrain_params, clust_params)
+    #main()
 
     '''
     binner_ = binner.Binner(autoencoder=autoencoders.DEC_greedy_autoencoder(train=None, valid=None), clustering_method= clustering_methods.clustering_k_means())
