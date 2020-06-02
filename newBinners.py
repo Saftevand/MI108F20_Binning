@@ -132,7 +132,7 @@ class Binner(abc.ABC):
 
         opt = keras.optimizers.Adam(learning_rate=self.clust_params['learning_rate'])
 
-        rerouted_autoencoder.compile(optimizer=opt, loss=[self.clust_params['reconst_loss'], self.clust_params['clust_loss']],
+        rerouted_autoencoder.compile(optimizer=opt, loss=[self.clust_params['reconst_loss'], GaussianLoss(bandwidth=self.clust_params['gaussian_bandwidth'])],
                                      loss_weights=self.clust_params['loss_weights'])
 
         print(rerouted_autoencoder.summary())
@@ -273,8 +273,11 @@ class Stacked_Binner(Binner):
 
         return stacked_ae
 
-    def load_model(self):
-        self.autoencoder = tf.keras.models.load_model('autoencoder')
+    def load_model(self, cluster_model=False):
+        if cluster_model:
+            self.autoencoder = tf.keras.models.load_model('autoencoder', custom_objects={"GaussianLoss": GaussianLoss})
+        else:
+            self.autoencoder = tf.keras.models.load_model('autoencoder')
         self.encoder = self.extract_encoder()
         print("Model loaded")
 
@@ -282,7 +285,7 @@ class Stacked_Binner(Binner):
         self.save_params()
         '''Method is ALMOST identical to Sparse_AE... uses Stacked AE instead'''
         if load_model:
-            load_model()
+            self.load_model()
 
         else:
             self.autoencoder = self.create_autoencoder()
@@ -295,7 +298,7 @@ class Stacked_Binner(Binner):
             self.pretraining(callbacks=[callback_projector, callback_activity, callback_results])
 
         if load_clustering_AE:
-            self.load_model()
+            self.load_model(cluster_model=True)
         else:
             #self.autoencoder = self.include_clustering_loss()
             #self.encoder = self.extract_encoder()
@@ -766,6 +769,23 @@ class Contractive_Binner(Stacked_Binner):
             callback.on_train_end()
         tensorboard.on_train_end(None)
 
+class GaussianLoss(tf.keras.losses.Loss):
+    def __init__(self, bandwidth=1, **kwargs):
+        self.bandwidth = bandwidth
+        super().__init__(**kwargs)
+
+    def call(self, y_true, y_pred):
+        error = y_true - y_pred
+        abs_err = tf.abs(error)
+        squared_err = tf.square(abs_err)
+        neg_squared_err = -squared_err
+
+        gaussian_weight = tf.exp(neg_squared_err/(2 * self.bandwidth))
+
+        return gaussian_weight * (0.5 * squared_err)
+
+    def get_config(self):
+        return {"bandwidth": self.bandwidth}
 
 class KLDivergenceRegularizer(tf.keras.regularizers.Regularizer):
     def __init__(self, weight, target=0.1, **kwargs):

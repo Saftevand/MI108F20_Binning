@@ -45,11 +45,12 @@ clust_params = {
     'learning_rate': 0.001,
     'optimizer': 'Adam',
     'loss_weights': [1, 0.05],  # [reconstruction, clustering]
+    'gaussian_bandwidth': 1,
     'jacobian_weight': 1e-4,
     'clustering_weight': 0.05,
-    'epochs': 100,
+    'epochs': 30,
     'reconst_loss': 'mae',
-    'clust_loss': 'mae',
+    'clust_loss': 'mae', #virker ikke for stacked --> default = gaussianloss
     'cuda': True,
     'eps': 0.5,
     'min_samples': 2,
