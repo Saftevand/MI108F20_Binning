@@ -24,14 +24,14 @@ pretrain_params = {
         'layer_size': 200,
         'num_hidden_layers': 4,
         'embedding_neurons': 32,
-        'epochs': [200, 800, 3000],
-        'batch_sizes': [256, 512, 4096],
+        'epochs': [5],#[200, 800, 3000],
+        'batch_sizes': [256],#[256, 512, 4096],
         'activation_fn': 'elu',
         'regularizer': None,
         'initializer': 'he_normal',
         'optimizer': 'Adam',
         'denoise': False,
-        'dropout': True,
+        'dropout': False,
         'drop_and_denoise_rate': 0.5,
         'BN': False,
         'sparseKLweight': 0.8,
@@ -43,11 +43,12 @@ clust_params = {
     'learning_rate': 0.001,
     'optimizer': 'Adam',
     'loss_weights': [1, 0.05],  # [reconstruction, clustering]
+    'gaussian_bandwidth': 1,
     'jacobian_weight': 1e-4,
     'clustering_weight': 0.05,
-    'epochs': 100,
+    'epochs': 30,
     'reconst_loss': 'mae',
-    'clust_loss': 'mae',
+    'clust_loss': 'mae', #virker ikke for stacked --> default = gaussianloss
     'cuda': True,
     'eps': 0.5,
     'min_samples': 2,
@@ -72,7 +73,7 @@ def run_on_windows(config, pretraining_params, clust_param):
     labels = list(contig_id_binid_sorted.values())
     feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels)
 
-    binner_instance = newBinners.create_binner(binner_type='SPARSE', feature_matrix=feature_matrix,
+    binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix,
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid ,train_labels=train_labels, validation_labels=validation_labels, clust_params=clustering_params, pretraining_params=pretraining_params)
 
 
