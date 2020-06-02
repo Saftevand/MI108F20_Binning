@@ -244,7 +244,7 @@ class Stacked_Binner(Binner):
         # Create decoding layers
         layer = embedding_layer
 
-        # TODO extra large layer before embed
+        # TODO extra large la  yer before embed
         # layer = tf.keras.layers.Dense(units=400, activation=activation_fn, kernel_initializer=init_fn,
         #                              kernel_regularizer=regularizer,
         #                              name=f'Decoding_layer_THICC')(layer)
@@ -514,31 +514,27 @@ class Contractive_Binner(Stacked_Binner):
         if load_model:
             self.autoencoder = tf.keras.models.load_model('autoencoder.h5')
         else:
-            self.autoencoder = self.create_stacked_AE()
+            self.autoencoder = self.create_autoencoder()
             callback_projector = ProjectEmbeddingCallback(binner=self)
-            callback_save = SaveBestModelCallback(binner=self)
+            callback_results = WriteBinsCallback(binner=self)
             callback_activity = ActivityCallback(binner=self)
 
-            self.pretraining(callbacks=[callback_projector, callback_activity, callback_save])
-            self.autoencoder.save('autoencoder.h5')
-            print("AE saved")
+            self.pretraining(callbacks=[callback_activity, callback_projector, callback_results])
 
         self.encoder = self.extract_encoder()
-        self.encoder.save('encoder.h5')
-        print("Encoder saved")
 
         if load_clustering_AE:
             self.autoencoder = tf.keras.models.load_model("clustering_AE.h5")
             self.encoder = self.extract_encoder()
         else:
-            self.autoencoder = self.include_clustering_loss()
-            callback_projector.prefix_name = 'DeepClustering_'
-            callback_save = SaveBestModelCallback(binner=self, clustering=True)
-            self.fit_dbscan([callback_projector, callback_save])
-            self.autoencoder.save('clustering_autoencoder.h5')
-            print("clustering_AE saved")
+            print("Skipping DC")
+            #self.autoencoder = self.include_clustering_loss()
+            #callback_projector.prefix_name = 'DeepClustering_'
+            #callback_save = SaveBestModelCallback(binner=self, clustering=True)
+            #self.fit_dbscan([callback_projector, callback_save])
+            #self.autoencoder.save('clustering_autoencoder.h5')
+            #print("clustering_AE saved")
 
-        self.bins = self.final_DBSCAN_clustering()
         return self.bins
 
     def extract_decoder(self):
@@ -566,7 +562,7 @@ class Contractive_Binner(Stacked_Binner):
         combined_losses = []
         x_train = tf.data.Dataset.from_tensor_slices(self.x_train)
         loss_function = tf.keras.losses.get(self.autoencoder.loss)
-        optimizer = self.pretraining_params['optimizer'](self.pretraining_params['learning_rate'])
+        optimizer = tf.optimizers.Adam(self.pretraining_params['learning_rate'])
         trained_samples = 0
         current_epoch = 0
         encoder = self.extract_encoder()
