@@ -17,6 +17,7 @@ import hdbscan
 import json
 import data_processor
 import subprocess
+import random
 
 
 class Binner(abc.ABC):
@@ -91,9 +92,11 @@ class Binner(abc.ABC):
         loss_function = tf.keras.losses.get(self.autoencoder.loss)
         trained_samples = 0
         current_epoch = 0
+        random.seed(2)
 
         for epochs_to_run, batch_size in zip(self.pretraining_params['epochs'], self.pretraining_params['batch_sizes']):
-            training_set = x_train.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
+            epoch_seed = random.randint(0, 40000)
+            training_set = x_train.shuffle(buffer_size=40000, seed=epoch_seed).repeat().batch(batch_size)
             training_labels = train_labels.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
 
             for epoch in range(epochs_to_run):
