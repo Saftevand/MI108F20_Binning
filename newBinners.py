@@ -425,7 +425,7 @@ class Stacked_Binner(Binner):
             all_assignments = hdbscan_instance.fit_predict(encoded_data_full)
 
             centroid_dict = {}
-            std_dict = {}
+            variance_dict = {}
             assignment_set = set(all_assignments)
             assignments_unique_sorted = sorted(list(assignment_set))
             for cluster_label in assignments_unique_sorted:
@@ -438,29 +438,29 @@ class Stacked_Binner(Binner):
                 centroid = np.mean(encoded_cluster, axis=0)
                 centroid_dict[cluster_label] = centroid
                 dists = np.sum(((encoded_cluster - centroid) ** 2), axis=1)
-                std = np.sqrt(np.sum(dists)/encoded_cluster.shape[0])
-                std_dict[cluster_label] = std
+                variance = np.sum(dists)/encoded_cluster.shape[0]
+                variance_dict[cluster_label] = variance
 
             centroids = np.vstack(list(centroid_dict.values()))
-            stds = np.hstack(list(std_dict.values()))
+            variances = np.hstack(list(variance_dict.values()))
             corrected_assignments = all_assignments.copy()
             centroids_of_assignments = []
-            stds_of_assignments = []
+            variances_of_assignments = []
 
             for index, (contig, cluster_label) in enumerate(zip(encoded_data_full, all_assignments)):
                 if cluster_label == -1:
                     dists = np.sum(((centroids - contig) ** 2), axis=1)
-                    gaussian_dists = np.exp(-dists / (2 * stds))
+                    gaussian_dists = np.exp(-dists / (2 * variances))
 
                     label_of_shortest_dist = np.argmin(gaussian_dists)
                     centroids_of_assignments.append(centroid_dict[label_of_shortest_dist])
                     corrected_assignments[index] = label_of_shortest_dist
-                    stds_of_assignments.append(std_dict[label_of_shortest_dist])
+                    variances_of_assignments.append(variance_dict[label_of_shortest_dist])
                 else:
                     centroids_of_assignments.append(centroid_dict[cluster_label])
-                    stds_of_assignments.append(std_dict[cluster_label])
+                    variances_of_assignments.append(variance_dict[cluster_label])
 
-            stds_of_assignments_tensor = tf.convert_to_tensor(stds_of_assignments, dtype=tf.float32)
+            variances_of_assignments_tensor = tf.convert_to_tensor(variances_of_assignments, dtype=tf.float32)
             centroids_of_assignments_tensor = tf.convert_to_tensor(centroids_of_assignments, dtype=tf.float32)
 
             with tf.GradientTape() as tape:
@@ -472,7 +472,7 @@ class Stacked_Binner(Binner):
                 # Clustering loss
                 dists = tf.reduce_sum(((encoded_data_full - centroids_of_assignments_tensor) ** 2), axis=1)
 
-                gaussian_weights = tf.exp(-dists / (2 * stds_of_assignments_tensor))
+                gaussian_weights = tf.exp(-dists / (2 * variances_of_assignments_tensor))
                 clustering_loss = tf.reduce_mean(gaussian_weights * dists) * self.clust_params['loss_weights'][1]
 
                 loss = tf.add_n([reconstruction_loss +  clustering_loss] + self.autoencoder.losses)
