@@ -304,15 +304,15 @@ class Stacked_Binner(Binner):
             self.load_model(cluster_model=True)
         else:
             #self.autoencoder = self.include_clustering_loss()
-            #self.encoder = self.extract_encoder()
-            #callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
+            self.encoder = self.extract_encoder()
+            callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
             #callback_projector.prefix_name = 'DeepClustering_'
-            #self.fit_clustering([callback_results])
+            self.fit_clustering([callback_results])
             print("Completing...")
 
         return self.bins
 
-    def fit_clustering(self, callbacks):
+    def fit_clustering_backup(self, callbacks):
         file_writer = tf.summary.create_file_writer(self.log_dir)
         x = self.feature_matrix
         eps = self.clust_params['eps']
@@ -392,6 +392,124 @@ class Stacked_Binner(Binner):
             if (epoch + 1) % self.clust_params['callback_interval'] == 0:
                 for callback in callbacks:
                     callback.on_epoch_end(epoch + 1,logs=all_assignments)
+            if no_improvemnt_epochs >= 20:
+                break
+        for callback in callbacks:
+            callback.on_train_end()
+
+    def fit_clustering(self, callbacks):
+        file_writer = tf.summary.create_file_writer(self.log_dir)
+        x = self.feature_matrix
+        eps = self.clust_params['eps']
+        best_loss = 1e10
+        no_improvemnt_epochs = 0
+        min_samples = self.clust_params['min_samples']
+        epochs = self.clust_params['epochs']
+
+        optimizer = tf.keras.optimizers.Adam(self.clust_params['learning_rate'])
+
+        for epoch in range(epochs):
+            print(f'Current epoch: {epoch + 1} of total epochs: {epochs}')
+
+            # 2. encode all data
+            encoded_data_full = self.encoder.predict(x)
+
+            # 3. cluster
+
+            current_time = time.strftime('%H:%M:%S')
+            print(current_time)
+
+            hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=self.clust_params['min_cluster_size'],
+                                               min_samples=self.clust_params['min_samples'], core_dist_n_jobs=36)
+            all_assignments = hdbscan_instance.fit_predict(encoded_data_full)
+
+            centroid_dict = {}
+            std_dict = {}
+            assignment_set = set(all_assignments)
+            assignments_unique_sorted = sorted(list(assignment_set))
+            for cluster_label in assignments_unique_sorted:
+                # if outlier
+                if cluster_label == -1:
+                    continue
+
+                cluster_mask = (all_assignments == cluster_label)
+                encoded_cluster = encoded_data_full[cluster_mask]
+                centroid = np.mean(encoded_cluster, axis=0)
+                centroid_dict[cluster_label] = centroid
+                dists = np.sum(((encoded_cluster - centroid) ** 2), axis=1)
+                std = np.sqrt(np.sum(dists)/encoded_cluster.shape[0])
+                std_dict[cluster_label] = std
+
+            centroids = np.vstack(list(centroid_dict.values()))
+            stds = np.hstack(list(std_dict.values()))
+            corrected_assignments = all_assignments.copy()
+            centroids_of_assignments = []
+            stds_of_assignments = []
+
+            for index, (contig, cluster_label) in enumerate(zip(encoded_data_full, all_assignments)):
+                if cluster_label == -1:
+                    dists = np.sum(((centroids - contig) ** 2), axis=1)
+                    gaussian_dists = np.exp(-dists / (2 * stds))
+
+                    label_of_shortest_dist = np.argmin(gaussian_dists)
+                    centroids_of_assignments.append(centroid_dict[label_of_shortest_dist])
+                    corrected_assignments[index] = label_of_shortest_dist
+                    stds_of_assignments.append(std_dict[label_of_shortest_dist])
+                else:
+                    centroids_of_assignments.append(centroid_dict[cluster_label])
+                    stds_of_assignments.append(std_dict[cluster_label])
+
+            stds_of_assignments_tensor = tf.convert_to_tensor(stds_of_assignments, dtype=tf.float32)
+            centroids_of_assignments_tensor = tf.convert_to_tensor(centroids_of_assignments, dtype=tf.float32)
+
+            with tf.GradientTape() as tape:
+
+                # Reconstruction loss
+                reconstructed = self.autoencoder(x, training=True)
+                reconstruction_loss = self.clust_params['loss_weights'][0] * tf.reduce_mean(tf.keras.losses.get(self.clust_params['reconst_loss'])(reconstructed, x))
+
+                # Clustering loss
+                dists = tf.reduce_sum(((encoded_data_full - centroids_of_assignments_tensor) ** 2), axis=1)
+
+                gaussian_weights = tf.exp(-dists / (2 * stds_of_assignments_tensor))
+                clustering_loss = tf.reduce_mean(gaussian_weights * dists) * self.clust_params['loss_weights'][1]
+
+                loss = tf.add_n([reconstruction_loss +  clustering_loss] + self.autoencoder.losses)
+
+            gradients = tape.gradient(loss, self.autoencoder.trainable_variables)
+            optimizer.apply_gradients(zip(gradients, self.autoencoder.trainable_variables))
+
+
+
+
+            complete_time = time.strftime('%H:%M:%S')
+            print(complete_time)
+
+            print(Counter(all_assignments))
+            no_clusters = max(all_assignments)
+            print(f'No. clusters: {no_clusters}')
+
+
+            combined_loss = self.clust_params['loss_weights'][0] * reconstruction_loss + self.clust_params['loss_weights'][1] * clustering_loss
+
+
+            print(
+                f'Epoch\t{epoch + 1}\t\tReconstruction_loss:{reconstruction_loss:.4f}\tClustering_loss:{clustering_loss:.4f}\tTotal_loss:{combined_loss:.4f}')
+            with file_writer.as_default():
+                tf.summary.scalar('DC_Reconstruction loss', reconstruction_loss, step=epoch + 1)
+                tf.summary.scalar('DC_Clustering loss', clustering_loss, step=epoch + 1)
+                tf.summary.scalar('DC_Total loss', combined_loss, step=epoch + 1)
+            if combined_loss < best_loss:
+                best_loss = combined_loss
+                no_improvemnt_epochs = 0
+                if epoch > 100:
+                    self.binner.clustering_autoencoder.save(
+                        os.path.join(self.binner.log_dir, 'clustering_autoencoder.h5'))
+            else:
+                no_improvemnt_epochs += 1
+            if (epoch + 1) % self.clust_params['callback_interval'] == 0:
+                for callback in callbacks:
+                    callback.on_epoch_end(epoch + 1, logs=all_assignments)
             if no_improvemnt_epochs >= 20:
                 break
         for callback in callbacks:
