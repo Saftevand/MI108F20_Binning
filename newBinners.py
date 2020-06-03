@@ -280,7 +280,7 @@ class Stacked_Binner(Binner):
         if cluster_model:
             self.autoencoder = tf.keras.models.load_model('autoencoder', custom_objects={"GaussianLoss": GaussianLoss})
         else:
-            self.autoencoder = tf.keras.models.load_model('autoencoder')
+            self.autoencoder = tf.keras.models.load_model('STACKED_Epoch_4000')
         self.encoder = self.extract_encoder()
         print("Model loaded")
 
@@ -403,11 +403,12 @@ class Stacked_Binner(Binner):
         eps = self.clust_params['eps']
         best_loss = 1e10
         no_improvemnt_epochs = 0
+        optimizer_weights = getattr(self.autoencoder.optimizer, 'weights')
         min_samples = self.clust_params['min_samples']
         epochs = self.clust_params['epochs']
 
         optimizer = tf.keras.optimizers.Adam(self.clust_params['learning_rate'])
-
+        optimizer.set_weights(optimizer_weights)
         for epoch in range(epochs):
             print(f'Current epoch: {epoch + 1} of total epochs: {epochs}')
 

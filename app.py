@@ -24,8 +24,8 @@ pretrain_params = {
         'layer_size': 100,
         'num_hidden_layers': 4,
         'embedding_neurons': 50,
-        'epochs': [1],
-        'batch_sizes': [512],
+        'epochs': [200, 800, 3000],
+        'batch_sizes': [256, 512, 4096],
         #'epochs': [5, 5, 5],
         #'batch_sizes': [1024, 2048, 4096],
         'activation_fn': 'elu',
@@ -68,7 +68,7 @@ def run_on_windows(config, pretraining_params, clust_param):
         pretraining_params, clustering_params = load_training_config(config)
 
 
-    dataset_path = '/home/SimonLinnebjerg/datasets/cami_high'
+    dataset_path = '/home/lasse/datasets/cami_high'
     #dataset_path = 'D:/datasets/cami_high'
     tnfs, contig_ids, depth = data_processor.load_data_local(dataset_path)
     ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
@@ -80,10 +80,10 @@ def run_on_windows(config, pretraining_params, clust_param):
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid ,train_labels=train_labels, validation_labels=validation_labels, clust_params=clustering_params, pretraining_params=pretraining_params)
 
 
-    binner_instance.do_binning(load_model=False, load_clustering_AE=False)
+    binner_instance.do_binning(load_model=True, load_clustering_AE=False)
 
-    #bins = binner_instance.get_assignments(include_outliers=False)
-    #data_processor.write_bins_to_file(bins)
+    bins = binner_instance.get_assignments(include_outliers=False)
+    data_processor.write_bins_to_file(bins)
     run_amber(binner_instance.log_dir)
 
     #run_amber('/home/binning/MI108F20_Binning/Logs/run_2020_06_01-11_59_12_STACKED/')
