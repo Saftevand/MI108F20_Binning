@@ -25,7 +25,7 @@ class Binner(abc.ABC):
                  train_labels=None, valid_labels=None, pretraining_params=None, clust_params=None):
         self.input_shape = x_train.shape[1]
         self.training_set_size = x_train.shape[0]
-        self.validation_set_size = x_valid.shape[0]
+        #self.validation_set_size = x_valid.shape[0]
         self.feature_matrix = tf.constant(feature_matrix)
         self.x_train = tf.constant(x_train)
         self.x_valid = tf.constant(x_valid)
@@ -93,11 +93,16 @@ class Binner(abc.ABC):
         trained_samples = 0
         current_epoch = 0
         random.seed(2)
+        epochs = self.pretraining_params['epochs']
+        epochs.append(1000)
+        batch_sizes = self.pretraining_params['batch_sizes']
+        batch_sizes.append(self.x_train.shape[0])
+        print(epochs, batch_sizes)
 
-        for epochs_to_run, batch_size in zip(self.pretraining_params['epochs'], self.pretraining_params['batch_sizes']):
+        for epochs_to_run, batch_size in zip(epochs, batch_sizes):
             epoch_seed = random.randint(0, 40000)
             training_set = x_train.shuffle(buffer_size=40000, seed=epoch_seed).repeat().batch(batch_size)
-            training_labels = train_labels.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
+            #training_labels = train_labels.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
 
             for epoch in range(epochs_to_run):
                 for batch in training_set:
@@ -109,11 +114,14 @@ class Binner(abc.ABC):
 
                 # Epoch over - get metrics
 
-                reconstruction = self.autoencoder(self.x_valid, training=False)
-                validation_loss = np.mean(loss_function(reconstruction, self.x_valid))
                 mean_train_loss = np.mean(train_loss)
-                print(
-                    f'Epoch\t{current_epoch + 1}\t\tTraining_loss:{mean_train_loss:.4f}\tValidation_loss:{validation_loss:.4f}')
+                if self.x_valid.shape[0] != 0:
+                    reconstruction = self.autoencoder(self.x_valid, training=False)
+                    validation_loss = np.mean(loss_function(reconstruction, self.x_valid))
+                    print(f'Epoch\t{current_epoch + 1}\t\tTraining_loss:{mean_train_loss:.4f}\tValidation_loss:{validation_loss:.4f}')
+                else:
+                    print(
+                        f'Epoch\t{current_epoch + 1}\t\tTraining_loss:{mean_train_loss:.4f}')
                 with file_writer.as_default():
                     tf.summary.scalar('Training loss', mean_train_loss, step=current_epoch + 1)
                     tf.summary.scalar('Validation loss', validation_loss, step=current_epoch + 1)
@@ -280,7 +288,7 @@ class Stacked_Binner(Binner):
         if cluster_model:
             self.autoencoder = tf.keras.models.load_model('autoencoder', custom_objects={"GaussianLoss": GaussianLoss})
         else:
-            self.autoencoder = tf.keras.models.load_model('STACKED_Epoch_4000')
+            self.autoencoder = tf.keras.models.load_model('STACKED_Epoch_5000')
         self.encoder = self.extract_encoder()
         print("Model loaded")
 
@@ -304,10 +312,10 @@ class Stacked_Binner(Binner):
             self.load_model(cluster_model=True)
         else:
             #self.autoencoder = self.include_clustering_loss()
-            self.encoder = self.extract_encoder()
-            callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
+            #self.encoder = self.extract_encoder()
+            #callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
             #callback_projector.prefix_name = 'DeepClustering_'
-            self.fit_clustering([callback_results])
+            #self.fit_clustering([callback_results])
             print("Completing...")
 
         return self.bins
@@ -475,7 +483,7 @@ class Stacked_Binner(Binner):
                 gaussian_weights = tf.exp(-dists / (2 * variances_of_assignments_tensor))
                 clustering_loss = tf.reduce_mean(gaussian_weights * dists) * self.clust_params['loss_weights'][1]
 
-                loss = tf.add_n([reconstruction_loss +  clustering_loss] + self.autoencoder.losses)
+                loss = tf.add_n([reconstruction_loss + clustering_loss] + self.autoencoder.losses)
 
             gradients = tape.gradient(loss, self.autoencoder.trainable_variables)
             optimizer.apply_gradients(zip(gradients, self.autoencoder.trainable_variables))
@@ -505,13 +513,13 @@ class Stacked_Binner(Binner):
                 no_improvemnt_epochs = 0
                 if epoch > 100:
                     self.binner.clustering_autoencoder.save(
-                        os.path.join(self.binner.log_dir, 'clustering_autoencoder.h5'))
+                        os.path.join(self.binner.log_dir, 'clustering_autoencoder'))
             else:
                 no_improvemnt_epochs += 1
             if (epoch + 1) % self.clust_params['callback_interval'] == 0:
                 for callback in callbacks:
                     callback.on_epoch_end(epoch + 1, logs=all_assignments)
-            if no_improvemnt_epochs >= 20:
+            if no_improvemnt_epochs >= 100:
                 break
         for callback in callbacks:
             callback.on_train_end()

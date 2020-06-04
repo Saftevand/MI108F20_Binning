@@ -23,7 +23,7 @@ pretrain_params = {
         'reconst_loss': 'mae',
         'layer_size': 100,
         'num_hidden_layers': 4,
-        'embedding_neurons': 50,
+        'embedding_neurons': 32,
         'epochs': [200, 800, 3000],
         'batch_sizes': [256, 512, 4096],
         #'epochs': [5, 5, 5],
@@ -44,7 +44,7 @@ pretrain_params = {
 clust_params = {
     'learning_rate': 0.001,
     'optimizer': 'Adam',
-    'loss_weights': [1, 0.05],  # [reconstruction, clustering]
+    'loss_weights': [1, 0.1],  # [reconstruction, clustering]
     'gaussian_bandwidth': 1,
     'jacobian_weight': 1e-4,
     'clustering_weight': 0.05,
@@ -74,7 +74,7 @@ def run_on_windows(config, pretraining_params, clust_param):
     ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
         os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
     labels = list(contig_id_binid_sorted.values())
-    feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels)
+    feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels, use_validation_data=False)
 
     binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix,
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid ,train_labels=train_labels, validation_labels=validation_labels, clust_params=clustering_params, pretraining_params=pretraining_params)
@@ -86,7 +86,7 @@ def run_on_windows(config, pretraining_params, clust_param):
     data_processor.write_bins_to_file(bins)
     run_amber(binner_instance.log_dir)
 
-    #run_amber('/home/binning/MI108F20_Binning/Logs/run_2020_06_01-11_59_12_STACKED/')
+    #run_amber('/home/lasse/MI108F20_Binning/Logs/run_2020_06_03-17_21_24_STACKED/')
 
 
 def load_training_config(config_path):
