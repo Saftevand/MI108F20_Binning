@@ -312,10 +312,10 @@ class Stacked_Binner(Binner):
             self.load_model(cluster_model=True)
         else:
             #self.autoencoder = self.include_clustering_loss()
-            #self.encoder = self.extract_encoder()
-            #callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
+            self.encoder = self.extract_encoder()
+            callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
             #callback_projector.prefix_name = 'DeepClustering_'
-            #self.fit_clustering([callback_results])
+            self.fit_clustering([callback_results])
             print("Completing...")
 
         return self.bins
