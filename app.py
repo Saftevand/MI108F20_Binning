@@ -16,6 +16,9 @@ from pathlib import Path
 import newBinners
 import os
 import matplotlib
+import time as time
+from collections import Counter
+
 matplotlib.use('Agg')
 
 pretrain_params = {
@@ -53,8 +56,8 @@ clust_params = {
     'clust_loss': 'mae', #virker ikke for stacked --> default = gaussianloss
     'cuda': True,
     'eps': 0.5,
-    'min_samples': 2,
-    'min_cluster_size': 6,
+    'min_samples': 3,
+    'min_cluster_size': 10,
     'callback_interval': 5
 }
 
@@ -76,21 +79,36 @@ def run_on_windows(config, pretraining_params, clust_param):
     #labels = list(contig_id_binid_sorted.values())
     labels = []
     feature_matrix, x_train, x_valid, train_labels, validation_labels, num_samples = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels, use_validation_data=False)
-
+    
     binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix, num_samples=num_samples,
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid,
                                                train_labels=train_labels, validation_labels=validation_labels,
                                                clust_params=clustering_params, pretraining_params=pretraining_params)
 
 
-    binner_instance.do_binning(load_model=False, load_clustering_AE=False)
+    #binner_instance.do_binning(load_model=False, load_clustering_AE=False)
+
+    encoded_data = np.load('STACKED_Epoch_180.npy')
+
+    print(time.strftime('%H:%M:%S'))
+    hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=binner_instance.clust_params['min_cluster_size'],
+                                       min_samples=binner_instance.clust_params['min_samples'], core_dist_n_jobs=36)
+    binner_instance.bins = hdbscan_instance.fit_predict(encoded_data)
+    print(time.strftime('%H:%M:%S'))
 
     bins = binner_instance.get_assignments(include_outliers=False)
-    data_processor.write_bins_to_file(bins)
+
+
+
+    data_processor.write_bins_to_file(bins, f'/home/SimonLinnebjerg/MI108F20_Binning/Comparison/mS{clust_params["min_samples"]}_mC{clust_params["min_cluster_size"]}_')
     #run_amber(binner_instance.log_dir)
+    list_bins = bins.tolist()
+    print(Counter(list_bins))
+    print(f'Num bins: {max(list_bins)}')
 
 
-    #run_amber('/home/SimonLinnebjerg/MI108F20_Binning/Comparison/')
+
+    run_amber('/home/SimonLinnebjerg/MI108F20_Binning/Comparison/')
 
 
 def load_training_config(config_path):
