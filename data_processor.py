@@ -151,7 +151,7 @@ def preprocess_data(tnfs, depths, labels=None, use_validation_data=False):
         train_labels = labels
         x_valid = []
         validation_labels = []
-    return feature_matrix, x_train, x_valid, train_labels, validation_labels
+    return feature_matrix, x_train, x_valid, train_labels, validation_labels, depth_shape
 
 
 def get_train_and_validation_data(feature_matrix, split_value=0.8):

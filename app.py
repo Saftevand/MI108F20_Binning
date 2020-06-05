@@ -33,13 +33,13 @@ pretrain_params = {
         'initializer': 'he_normal',
         'optimizer': 'Adam',
         'denoise': False,
-        'dropout': False,
+        'dropout': True,
         'drop_and_denoise_rate': 0.1,
         'BN': False,
         'sparseKLweight': 0.5,
         'sparseKLtarget': 0.1,
         'jacobian_weight': 1e-4,
-        'callback_interval': 500
+        'callback_interval': 200
     }
 clust_params = {
     'learning_rate': 0.0001,
@@ -68,17 +68,19 @@ def run_on_windows(config, pretraining_params, clust_param):
         pretraining_params, clustering_params = load_training_config(config)
 
 
-    dataset_path = '/home/lasse/datasets/cami_airways'
+    dataset_path = '/home/SimonLinnebjerg/datasets/cami_airways'
     #dataset_path = 'D:/datasets/cami_airways'
     tnfs, contig_ids, depth = data_processor.load_data_local(dataset_path)
     #ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
     #    os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
     #labels = list(contig_id_binid_sorted.values())
     labels = []
-    feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels, use_validation_data=False)
+    feature_matrix, x_train, x_valid, train_labels, validation_labels, num_samples = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels, use_validation_data=False)
 
-    binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix,
-                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid ,train_labels=train_labels, validation_labels=validation_labels, clust_params=clustering_params, pretraining_params=pretraining_params)
+    binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix, num_samples=num_samples,
+                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid,
+                                               train_labels=train_labels, validation_labels=validation_labels,
+                                               clust_params=clustering_params, pretraining_params=pretraining_params)
 
 
     binner_instance.do_binning(load_model=False, load_clustering_AE=False)
@@ -87,7 +89,8 @@ def run_on_windows(config, pretraining_params, clust_param):
     data_processor.write_bins_to_file(bins)
     #run_amber(binner_instance.log_dir)
 
-    #run_amber('/home/lasse/MI108F20_Binning/Airways_results/')
+
+    #run_amber('/home/SimonLinnebjerg/MI108F20_Binning/Comparison/')
 
 
 def load_training_config(config_path):
