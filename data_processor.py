@@ -160,7 +160,7 @@ def preprocess_data(tnfs, depths, labels=None, use_validation_data=False):
     tnfs_train -= np.mean(tnfs_train, axis=0)
     tnfs_train /= np.std(tnfs_train, axis=0)
 
-    feature_matrix = np.hstack([tnfs, normalized_depth])
+    feature_matrix = np.hstack([tnfs_train, normalized_depth])
     x_train = feature_matrix
 
     return feature_matrix, x_train, x_valid, train_labels, validation_labels
