@@ -276,7 +276,8 @@ class Stacked_Binner(Binner):
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
-        stacked_ae.compile(optimizer=optimizer, loss=VAMBloss)
+        stacked_ae.compile(optimizer=optimizer, loss=vamb_loss_function, run_eagerly=True)
+        #stacked_ae.compile(optimizer=optimizer, loss=VAMBloss())
 
         print(stacked_ae.summary())
         self.autoencoder = stacked_ae
@@ -524,6 +525,50 @@ class Stacked_Binner(Binner):
         for callback in callbacks:
             callback.on_train_end()
 
+
+def vamb_loss_function(y_true, y_pred):
+
+    y_true_tnfs = y_true[:, :103]
+    y_true_abd = y_true[:, 103:]
+
+    y_pred_tnfs = y_pred[:, :103]
+    y_pred_abd = y_pred[:, 103:]
+
+    # TNF error
+    tnf_error = y_true_tnfs - y_pred_tnfs
+    abs_tnf_err = tf.abs(tnf_error)
+    squared_tnf_err = tf.square(abs_tnf_err)
+    total_tnf_err = tf.reduce_mean(tf.reduce_sum(squared_tnf_err, axis=0))
+
+    # ABUNDANCE error
+    abd_diff = y_true_abd - y_pred_abd
+    sqrd_abd_err = tf.square(abd_diff)
+    total_abd_err = tf.reduce_mean(tf.reduce_sum(sqrd_abd_err, axis=0))
+
+
+    #ln_abundance_in = tf.math.log(y_pred_abd)
+    #summed_abundance_error = tf.reduce_sum(ln_abundance_in * y_true_abd,axis=0)
+    #abd_err = tf.reduce_mean(tf.reduce_sum(ln_abundance_in * y_true_abd, axis=0))
+
+    # WEIGHTS
+    s = y_pred_abd.shape[1]
+    w = s/(s+1)
+    weighted_tnf = total_tnf_err**(1-w)
+
+    weighted_abd = total_abd_err**w
+
+    loss =  weighted_tnf + weighted_abd
+    '''
+    alpha = 0.05
+    beta = 200 # only used with KL divergence
+    
+
+    ab_weight = (1-alpha)*np.log(s)**-1
+
+    tnf_weight = alpha/136
+    loss = (ab_weight * abd_err) + (tnf_weight * total_tnf_err)
+    '''
+    return loss
 
 class Sparse_Binner(Stacked_Binner):
 
@@ -923,31 +968,31 @@ class VAMBloss(tf.keras.losses.Loss):
 
     def call(self, y_true, y_pred):
 
-        y_true_tnfs = y_true[:, :104]
-        y_true_abd = y_true[:, 104:]
+        y_true_tnfs = y_true[:, :103]
+        y_true_abd = y_true[:, 103:]
 
-        y_pred_tnfs = y_pred[:, :104]
-        y_pred_abd = y_pred[:, 104:]
+        y_pred_tnfs = y_pred[:, :103]
+        y_pred_abd = y_pred[:, 103:]
 
         # TNF error
         tnf_error = y_true_tnfs - y_pred_tnfs
         abs_tnf_err = tf.abs(tnf_error)
         squared_tnf_err = tf.square(abs_tnf_err)
-        total_tnf_err = tf.reduce_sum(tf.reduce_mean(squared_tnf_err))
+        total_tnf_err = tf.reduce_mean(tf.reduce_sum(squared_tnf_err, axis=0))
 
         # ABUNDANCE error
-        abd_err = tf.reduce_sum(tf.math.log(y_pred_abd) * y_true_abd)
+        abd_err = tf.reduce_mean(tf.reduce_sum(tf.math.log(y_pred_abd) * y_true_abd, axis=0))
 
         # WEIGHTS
         alpha = 0.05
         beta = 200 # only used with KL divergence
-        s = y_true_abd.shape[1]
+        s = y_pred_abd.shape[1]
 
         ab_weight = (1-alpha)*np.log(s)**-1
 
         tnf_weight = alpha/136
-
-        return (ab_weight * abd_err) + (tnf_weight * total_tnf_err)
+        loss = (ab_weight * abd_err) + (tnf_weight * total_tnf_err)
+        return loss
 
     def get_config(self):
         return {}
@@ -1100,7 +1145,6 @@ class ProjectEmbeddingCallback(tf.keras.callbacks.Callback):
 
         return data_to_project
 
-
 class ActivityCallback(tf.keras.callbacks.Callback):
 
     def __init__(self, binner):
@@ -1150,7 +1194,6 @@ class ActivityCallback(tf.keras.callbacks.Callback):
         with self.file_writer.as_default():
             tf.summary.image("Neuron histogram", plot_to_image(figure), step=epoch)
         print("wrote images")
-
 
 class WriteBinsCallback(tf.keras.callbacks.Callback):
     def __init__(self, binner, clustering_ae=False):
