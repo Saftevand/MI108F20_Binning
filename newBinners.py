@@ -276,7 +276,7 @@ class Stacked_Binner(Binner):
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
-        stacked_ae.compile(optimizer=optimizer, loss=reconst_loss)
+        stacked_ae.compile(optimizer=optimizer, loss=VAMBloss)
 
         print(stacked_ae.summary())
         self.autoencoder = stacked_ae
@@ -916,6 +916,41 @@ class GaussianLoss(tf.keras.losses.Loss):
 
     def get_config(self):
         return {"bandwidth": self.bandwidth}
+
+class VAMBloss(tf.keras.losses.Loss):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def call(self, y_true, y_pred):
+
+        y_true_tnfs = y_true[:, :104]
+        y_true_abd = y_true[:, 104:]
+
+        y_pred_tnfs = y_pred[:, :104]
+        y_pred_abd = y_pred[:, 104:]
+
+        # TNF error
+        tnf_error = y_true_tnfs - y_pred_tnfs
+        abs_tnf_err = tf.abs(tnf_error)
+        squared_tnf_err = tf.square(abs_tnf_err)
+        total_tnf_err = tf.reduce_sum(tf.reduce_mean(squared_tnf_err))
+
+        # ABUNDANCE error
+        abd_err = tf.reduce_sum(tf.math.log(y_pred_abd) * y_true_abd)
+
+        # WEIGHTS
+        alpha = 0.05
+        beta = 200 # only used with KL divergence
+        s = y_true_abd.shape[1]
+
+        ab_weight = (1-alpha)*np.log(s)**-1
+
+        tnf_weight = alpha/136
+
+        return (ab_weight * abd_err) + (tnf_weight * total_tnf_err)
+
+    def get_config(self):
+        return {}
 
 class KLDivergenceRegularizer(tf.keras.regularizers.Regularizer):
     def __init__(self, weight, target=0.1, **kwargs):
