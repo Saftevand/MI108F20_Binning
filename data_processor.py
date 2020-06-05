@@ -123,13 +123,13 @@ def preprocess_data(tnfs, depths, labels=None, use_validation_data=False):
     tnf_shape = tnfs.shape[1]
     depth_shape = depths.shape[1]
     number_of_features = tnf_shape + depth_shape
-    tnf_weight = tnf_shape / number_of_features
-    depth_weight = depth_shape / number_of_features
-    weighted_tnfs = tnfs * tnf_weight
-    weighted_depths = depths * depth_weight
+
 
     # feature_matrix = np.hstack([weighted_tnfs, weighted_depths])
-    feature_matrix = np.hstack([tnfs, depths])
+
+    # z-normalize tnf
+
+    '''
     if use_validation_data:
         x_train, x_valid, train_labels, validation_labels = train_test_split(feature_matrix, labels, test_size=0.2, shuffle=True,random_state=2)
         training_mean = np.mean(x_train, axis=0)
@@ -142,15 +142,27 @@ def preprocess_data(tnfs, depths, labels=None, use_validation_data=False):
         x_valid /= training_std
         feature_matrix -= training_mean
         feature_matrix /= training_std
-    else:
-        x_train = feature_matrix.copy()
-        training_mean = np.mean(x_train, axis=0)
-        training_std = np.std(x_train, axis=0)
-        x_train -= training_mean
-        x_train /= training_std
-        train_labels = labels
-        x_valid = []
-        validation_labels = []
+
+
+    x_train = feature_matrix.copy()
+    training_mean = np.mean(x_train, axis=0)
+    training_std = np.std(x_train, axis=0)
+    x_train -= training_mean
+    x_train /= training_std
+    '''
+
+    normalized_depth = normalize(depths, axis=1, norm='l1')
+
+    train_labels = labels
+    x_valid = []
+    validation_labels = []
+    tnfs_train = tnfs.copy()
+    tnfs_train -= np.mean(tnfs_train, axis=0)
+    tnfs_train /= np.std(tnfs_train, axis=0)
+
+    feature_matrix = np.hstack([tnfs, normalized_depth])
+    x_train = feature_matrix
+
     return feature_matrix, x_train, x_valid, train_labels, validation_labels
 
 
@@ -237,9 +249,6 @@ def load_data_local(dataset_path, normalize_data=True):
     tnfs = np.load(os.path.join(dataset_path, "tnfs_high.npy"))
     contig_ids = np.load(os.path.join(dataset_path, "contig_ids_high.npy"))
     depth = np.load(os.path.join(dataset_path, "depths_high.npy"))
-    if normalize_data:
-        depth = normalize(depth, axis=1, norm='l1')
-        tnfs = normalize(tnfs, axis=1, norm='l1')
 
     return tnfs, contig_ids, depth
 

@@ -39,7 +39,7 @@ pretrain_params = {
         'sparseKLweight': 0.5,
         'sparseKLtarget': 0.1,
         'jacobian_weight': 1e-4,
-        'callback_interval': 500
+        'callback_interval': 100
     }
 clust_params = {
     'learning_rate': 0.0001,
@@ -78,7 +78,7 @@ def run_on_windows(config, pretraining_params, clust_param):
     feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels, use_validation_data=False)
 
     binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix,
-                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid ,train_labels=train_labels, validation_labels=validation_labels, clust_params=clustering_params, pretraining_params=pretraining_params)
+                                               contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid, train_labels=train_labels, validation_labels=validation_labels, clust_params=clustering_params, pretraining_params=pretraining_params)
 
 
     binner_instance.do_binning(load_model=False, load_clustering_AE=False)
