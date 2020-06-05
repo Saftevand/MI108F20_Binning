@@ -22,9 +22,10 @@ import random
 
 class Binner(abc.ABC):
     def __init__(self, name, contig_ids, feature_matrix=None, labels=None, x_train=None, x_valid=None,
-                 train_labels=None, valid_labels=None, pretraining_params=None, clust_params=None):
+                 train_labels=None, valid_labels=None, pretraining_params=None, clust_params=None, num_samples=None):
         self.input_shape = x_train.shape[1]
         self.training_set_size = x_train.shape[0]
+        self.num_samples = num_samples
         #self.validation_set_size = x_valid.shape[0]
         self.feature_matrix = tf.constant(feature_matrix)
         self.x_train = tf.constant(x_train)
@@ -200,14 +201,46 @@ class Binner(abc.ABC):
             }
             json.dump(config, config_file)
 
+    def vamb_loss_function(self):
+        # returns the actual loss fn
+        s = self.num_samples
+
+        def prefer_abd(y_true, y_pred):
+            y_true_tnfs = y_true[:, :-s]
+            y_true_abd = y_true[:, -s:]
+
+            y_pred_tnfs = y_pred[:, :-s]
+            y_pred_abd = y_pred[:, -s:]
+
+            # TNF error
+            tnf_error = y_true_tnfs - y_pred_tnfs
+            abs_tnf_err = tf.abs(tnf_error)
+            squared_tnf_err = tf.square(abs_tnf_err)
+            total_tnf_err = tf.reduce_sum(squared_tnf_err, axis=1)
+
+            # ABUNDANCE error
+            abd_diff = y_true_abd - y_pred_abd
+            sqrd_abd_err = tf.square(abd_diff)
+            total_abd_err = tf.reduce_sum(sqrd_abd_err, axis=1)
+
+            # WEIGHTS
+            w = s / (s + 1)
+            weighted_tnf = total_tnf_err ** (1 - w)
+
+            weighted_abd = total_abd_err ** w
+
+            loss = weighted_tnf + weighted_abd
+            return loss
+        return prefer_abd
+
 
 class Stacked_Binner(Binner):
 
-    def __init__(self, name, contig_ids, feature_matrix, labels=None, x_train=None,
-                 x_valid=None, train_labels=None,validation_labels=None, pretraining_params=None, clust_params=None):
+    def __init__(self, name, contig_ids, feature_matrix, labels=None, x_train=None, x_valid=None, train_labels=None,
+                 validation_labels=None, pretraining_params=None, clust_params=None, num_samples=None):
         super().__init__(name=name, contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels,
                          x_train=x_train, x_valid=x_valid, train_labels=train_labels, valid_labels=validation_labels,
-                         pretraining_params=pretraining_params, clust_params=clust_params)
+                         pretraining_params=pretraining_params, clust_params=clust_params, num_samples=num_samples)
 
     def create_autoencoder(self):
         # get params from param dict
@@ -276,8 +309,7 @@ class Stacked_Binner(Binner):
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
-        stacked_ae.compile(optimizer=optimizer, loss=vamb_loss_function, run_eagerly=True)
-        #stacked_ae.compile(optimizer=optimizer, loss=VAMBloss())
+        stacked_ae.compile(optimizer=optimizer, loss=self.vamb_loss_function())
 
         print(stacked_ae.summary())
         self.autoencoder = stacked_ae
@@ -526,50 +558,6 @@ class Stacked_Binner(Binner):
             callback.on_train_end()
 
 
-def vamb_loss_function(y_true, y_pred):
-
-    y_true_tnfs = y_true[:, :103]
-    y_true_abd = y_true[:, 103:]
-
-    y_pred_tnfs = y_pred[:, :103]
-    y_pred_abd = y_pred[:, 103:]
-
-    # TNF error
-    tnf_error = y_true_tnfs - y_pred_tnfs
-    abs_tnf_err = tf.abs(tnf_error)
-    squared_tnf_err = tf.square(abs_tnf_err)
-    total_tnf_err = tf.reduce_mean(tf.reduce_sum(squared_tnf_err, axis=0))
-
-    # ABUNDANCE error
-    abd_diff = y_true_abd - y_pred_abd
-    sqrd_abd_err = tf.square(abd_diff)
-    total_abd_err = tf.reduce_mean(tf.reduce_sum(sqrd_abd_err, axis=0))
-
-
-    #ln_abundance_in = tf.math.log(y_pred_abd)
-    #summed_abundance_error = tf.reduce_sum(ln_abundance_in * y_true_abd,axis=0)
-    #abd_err = tf.reduce_mean(tf.reduce_sum(ln_abundance_in * y_true_abd, axis=0))
-
-    # WEIGHTS
-    s = y_pred_abd.shape[1]
-    w = s/(s+1)
-    weighted_tnf = total_tnf_err**(1-w)
-
-    weighted_abd = total_abd_err**w
-
-    loss =  weighted_tnf + weighted_abd
-    '''
-    alpha = 0.05
-    beta = 200 # only used with KL divergence
-    
-
-    ab_weight = (1-alpha)*np.log(s)**-1
-
-    tnf_weight = alpha/136
-    loss = (ab_weight * abd_err) + (tnf_weight * total_tnf_err)
-    '''
-    return loss
-
 class Sparse_Binner(Stacked_Binner):
 
     def create_autoencoder(self):
@@ -682,10 +670,10 @@ class Sparse_Binner(Stacked_Binner):
 
 class Contractive_Binner(Stacked_Binner):
     def __init__(self, name, contig_ids, feature_matrix, labels=None, x_train=None,
-                 x_valid=None, train_labels=None,validation_labels=None, pretraining_params=None, clust_params=None):
+                 x_valid=None, train_labels=None,validation_labels=None, pretraining_params=None, clust_params=None, num_samples=None):
         super().__init__(name=name, contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels,
                          x_train=x_train, x_valid=x_valid, train_labels=train_labels, validation_labels=validation_labels,
-                         pretraining_params=pretraining_params, clust_params=clust_params)
+                         pretraining_params=pretraining_params, clust_params=clust_params, num_samples=num_samples)
 
     def do_binning(self, load_model=False, load_clustering_AE=True):
         '''Method is ALMOST identical to Sparse_AE... uses Stacked AE instead'''
@@ -1013,11 +1001,13 @@ class KLDivergenceRegularizer(tf.keras.regularizers.Regularizer):
 
 
 def create_binner(binner_type, contig_ids, feature_matrix, labels=None, x_train=None, x_valid=None, train_labels=None,
-                  validation_labels=None, pretraining_params=None, clust_params=None):
+                  validation_labels=None, pretraining_params=None, clust_params=None, num_samples=None):
     binner = binner_dict[binner_type]
 
     binner_instance = binner(name=binner_type, contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels,
-                                  x_train=x_train, x_valid=x_valid,train_labels=train_labels, validation_labels=validation_labels, pretraining_params=pretraining_params, clust_params=clust_params)
+                             x_train=x_train, x_valid=x_valid,train_labels=train_labels,
+                             validation_labels=validation_labels, pretraining_params=pretraining_params,
+                             clust_params=clust_params, num_samples=num_samples)
     return binner_instance
 
 class Learning_rate_batch_size_scheduler():

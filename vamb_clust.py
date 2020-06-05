@@ -302,7 +302,7 @@ def _find_threshold(histogram, peak_valley_ratio, cuda):
             peak_density = density
 
         # Peak is over when density drops below 60% of peak density
-        if not peak_over and density < 0.8 * peak_density:
+        if not peak_over and density < 0.6 * peak_density:
             peak_over = True
             density_at_minimum = density
 
