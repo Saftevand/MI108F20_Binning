@@ -94,9 +94,9 @@ class Binner(abc.ABC):
         current_epoch = 0
         random.seed(2)
         epochs = self.pretraining_params['epochs']
-        epochs.append(1000)
+        #epochs.append(1000)
         batch_sizes = self.pretraining_params['batch_sizes']
-        batch_sizes.append(self.x_train.shape[0])
+        #batch_sizes.append(self.x_train.shape[0])
         print(epochs, batch_sizes)
 
         for epochs_to_run, batch_size in zip(epochs, batch_sizes):
@@ -193,7 +193,7 @@ class Binner(abc.ABC):
     def save_params(self):
         path = os.path.join(self.log_dir,'training_config.json')
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path,'w') as config_file:
+        with open(path, 'w') as config_file:
             config = {
                 'pretraining_params': self.pretraining_params,
                 'clust_params': self.clust_params,
@@ -288,13 +288,12 @@ class Stacked_Binner(Binner):
         if cluster_model:
             self.autoencoder = tf.keras.models.load_model('autoencoder', custom_objects={"GaussianLoss": GaussianLoss})
         else:
-            self.autoencoder = tf.keras.models.load_model('STACKED_Epoch_5000')
+            self.autoencoder = tf.keras.models.load_model('STACKED_Epoch_3000')
         self.encoder = self.extract_encoder()
         print("Model loaded")
 
     def do_binning(self, load_model=False, load_clustering_AE=True):
         self.save_params()
-        '''Method is ALMOST identical to Sparse_AE... uses Stacked AE instead'''
         if load_model:
             self.load_model()
 
@@ -306,16 +305,16 @@ class Stacked_Binner(Binner):
             callback_activity = ActivityCallback(binner=self)
             callback_results = WriteBinsCallback(binner=self)
 
-            self.pretraining(callbacks=[callback_projector, callback_activity, callback_results])
+            self.pretraining(callbacks=[callback_results])
 
         if load_clustering_AE:
             self.load_model(cluster_model=True)
         else:
             #self.autoencoder = self.include_clustering_loss()
-            self.encoder = self.extract_encoder()
-            callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
+            #self.encoder = self.extract_encoder()
+            #callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
             #callback_projector.prefix_name = 'DeepClustering_'
-            self.fit_clustering([callback_results])
+            #self.fit_clustering([callback_results])
             print("Completing...")
 
         return self.bins
@@ -421,7 +420,8 @@ class Stacked_Binner(Binner):
             print(f'Current epoch: {epoch + 1} of total epochs: {epochs}')
 
             # 2. encode all data
-            encoded_data_full = self.encoder.predict(x)
+            encoded_data_full = self.encoder(x, training=True).numpy()
+            print(f'encoded data shape: {encoded_data_full.shape}')
 
             # 3. cluster
 
@@ -503,7 +503,7 @@ class Stacked_Binner(Binner):
 
 
             print(
-                f'Epoch\t{epoch + 1}\t\tReconstruction_loss:{reconstruction_loss:.4f}\tClustering_loss:{clustering_loss:.4f}\tTotal_loss:{combined_loss:.4f}')
+                f'Epoch\t{epoch + 1}\t\tReconstruction_loss:{reconstruction_loss:.4f}\tClustering_loss:{clustering_loss:.8f}\tTotal_loss:{combined_loss:.4f}')
             with file_writer.as_default():
                 tf.summary.scalar('DC_Reconstruction loss', reconstruction_loss, step=epoch + 1)
                 tf.summary.scalar('DC_Clustering loss', clustering_loss, step=epoch + 1)
@@ -940,7 +940,49 @@ def create_binner(binner_type, contig_ids, feature_matrix, labels=None, x_train=
                                   x_train=x_train, x_valid=x_valid,train_labels=train_labels, validation_labels=validation_labels, pretraining_params=pretraining_params, clust_params=clust_params)
     return binner_instance
 
+class Learning_rate_batch_size_scheduler():
+    def __init__(self,binner, base_lr=0.005, epochs_to_run=100):
+        self.base_lr = base_lr
+        self.epochs_to_run = epochs_to_run
 
+        self.steps = [epochs_to_run*0.3,epochs_to_run*0.3,epochs_to_run*0.2]
+        self.binner = binner
+        self.initial_batchsize = binner.x_train.shape[0] *0.01
+
+'''
+class ChangeLR(tf.keras.callbacks.Callback):
+    def __init__(self, base_lr=0.001, decrement=0.0001, binner):
+        super().__init__()
+        self.binner = binner
+        self.base_lr = base_lr
+        self.decrement = decrement
+        self.trn_iterations = 0.
+        self.history = {}
+
+    def decrease_lr(self):
+        return self.base_lr - self.decrement
+
+    def on_train_begin(self, logs={}):
+        logs = logs or {}
+
+        if self.trn_iterations == 0:
+            K.set_value(self.model.optimizer.lr, self.base_lr)
+        else:
+            K.set_value(self.model.optimizer.lr, self.decrease_lr())
+
+    def on_batch_end(self, epoch, logs=None):
+
+        logs = logs or {}
+        self.trn_iterations += 1
+
+        self.history.setdefault('lr', []).append(K.get_value(self.model.optimizer.lr))
+        self.history.setdefault('iterations', []).append(self.trn_iterations)
+
+        for k, v in logs.items():
+            self.history.setdefault(k, []).append(v)
+
+        K.set_value(self.model.optimizer.lr, self.decrease_lr())
+'''
 class ProjectEmbeddingCallback(tf.keras.callbacks.Callback):
 
     def __init__(self, binner, log_dir=None, prefix_name=False):
@@ -1092,6 +1134,7 @@ class WriteBinsCallback(tf.keras.callbacks.Callback):
             data = self.binner.encoder.predict(self.binner.feature_matrix)
             hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=self.binner.clust_params['min_cluster_size'], min_samples=self.binner.clust_params['min_samples'], core_dist_n_jobs=36)
             all_assignments = hdbscan_instance.fit_predict(data)
+            print(f'Number of clusters found: {max(all_assignments)}')
         self.binner.bins = all_assignments
         bins_without_outliers = self.binner.get_assignments(include_outliers=False)
         data_processor.write_bins_to_file(bins_without_outliers, output_dir=os.path.join(self.binner.log_dir, f'{self.prefix}Epoch_{epoch}'))

@@ -231,12 +231,16 @@ def get_cami_data_truth(path):
     return ids, contig_ids, contigid_to_binid, contig_id_binid_sorted
 
 
-def load_data_local(dataset_path):
+def load_data_local(dataset_path, normalize_data=True):
 
     dataset_path = dataset_path
     tnfs = np.load(os.path.join(dataset_path, "tnfs_high.npy"))
     contig_ids = np.load(os.path.join(dataset_path, "contig_ids_high.npy"))
     depth = np.load(os.path.join(dataset_path, "depths_high.npy"))
+    if normalize_data:
+        depth = normalize(depth, axis=1, norm='l1')
+        tnfs = normalize(tnfs, axis=1, norm='l1')
+
     return tnfs, contig_ids, depth
 
 
