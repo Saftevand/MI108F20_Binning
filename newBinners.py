@@ -271,12 +271,46 @@ class Stacked_Binner(Binner):
         layer = tf.keras.layers.BatchNormalization()(layer) if bn else layer
         decoder_output = tf.keras.layers.Dense(units=input_shape, kernel_initializer=init_fn,
                                                name='Decoder_output_layer')(layer)
+        '''
+        tnf = decoder_output[:,:-5]
+        abd = decoder_output[:,-5:]
+
+        sm_abd = tf.keras.activations.softmax(abd)
+
+        concat = tf.keras.layers.Concatenate(axis=1)([tnf, sm_abd])
+        '''
 
         stacked_ae = tf.keras.Model(encoder_input, decoder_output, name='autoencoder')
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
-        stacked_ae.compile(optimizer=optimizer, loss=reconst_loss)
+        def loss_fn(y_pred, y_true):
+            s = 5
+            y_true_tnfs = y_true[:, :-s]
+            y_true_abd = y_true[:, -s:]
+
+            y_pred_tnfs = y_pred[:, :-s]
+            y_pred_abd = y_pred[:, -s:]
+
+            # TNF error
+            #tnf_diff = tf.abs(y_true_tnfs - y_pred_tnfs)
+
+            #tnf_err = tf.reduce_mean(tf.reduce_sum(tnf_diff, axis=1))
+            tnf_err = tf.losses.MAE(y_pred_tnfs, y_true_tnfs)
+
+            # ABUNDANCE error
+            #abd_diff = tf.abs(y_true_abd - y_pred_abd)
+            #abd_err = tf.reduce_mean(tf.reduce_sum(abd_diff, axis=1))
+            abd_err = tf.losses.MAE(y_pred_abd, y_true_abd)
+            # total_abd_err = tf.reduce_sum(-(tf.math.log(y_pred_abd + 1e-9)) * y_true_abd, axis=1)
+
+            # ratio = np.ceil(num_tnfs / s)
+            # loss = tnf_err/ s + abd_err
+            # loss = (tnf_err / (s + num_tnfs)) + abd_err
+            loss = tnf_err/s + abd_err
+            return loss
+
+        stacked_ae.compile(optimizer=optimizer, loss=loss_fn)
 
         print(stacked_ae.summary())
         self.autoencoder = stacked_ae
