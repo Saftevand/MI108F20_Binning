@@ -955,7 +955,7 @@ class ProjectEmbeddingCallback(tf.keras.callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         print("Entered project callback")
-        embeddings = self.binner.encoder(self.binner.feature_matrix)
+        embeddings = self.binner.encoder(self.binner.x_train)
         data_to_project = self.project_data(embedding=embeddings, epoch=epoch)
         print("Ran project data")
         data_variable = tf.Variable(data_to_project, name=f'{self.prefix_name}epoch{epoch}')
@@ -1089,13 +1089,14 @@ class WriteBinsCallback(tf.keras.callbacks.Callback):
         if logs is not None:
             all_assignments = logs
         else:
-            data = self.binner.encoder.predict(self.binner.feature_matrix)
+            data = self.binner.encoder.predict(self.binner.x_train)
             hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=self.binner.clust_params['min_cluster_size'], min_samples=self.binner.clust_params['min_samples'], core_dist_n_jobs=36)
             all_assignments = hdbscan_instance.fit_predict(data)
-        self.binner.bins = all_assignments
-        bins_without_outliers = self.binner.get_assignments(include_outliers=False)
-        data_processor.write_bins_to_file(bins_without_outliers, output_dir=os.path.join(self.binner.log_dir, f'{self.prefix}Epoch_{epoch}'))
-        self.binner.autoencoder.save(os.path.join(self.binner.log_dir, f'{self.prefix}Epoch_{epoch}'))
+            self.binner.bins = all_assignments
+            bins_without_outliers = self.binner.get_assignments(include_outliers=False)
+            data_processor.write_bins_to_file(bins_without_outliers, output_dir=os.path.join(self.binner.log_dir, f'{self.prefix}Epoch_{epoch}'))
+
+            #self.binner.autoencoder.save(os.path.join(self.binner.log_dir, f'{self.prefix}Epoch_{epoch}'))
 
 def plot_to_image(figure):
     """Converts the matplotlib plot specified by 'figure' to a PNG image and

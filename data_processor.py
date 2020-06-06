@@ -133,9 +133,8 @@ def preprocess_data(tnfs, depths, labels=None, use_validation_data=False):
     if use_validation_data:
         x_train, x_valid, train_labels, validation_labels = train_test_split(feature_matrix, labels, test_size=0.2, shuffle=True,random_state=2)
         training_mean = np.mean(x_train, axis=0)
-        training_std = np.std(x_train, axis=0)
-
         x_train -= training_mean
+        training_std = np.std(x_train, axis=0)
         x_train /= training_std
 
         x_valid -= training_mean
@@ -145,8 +144,8 @@ def preprocess_data(tnfs, depths, labels=None, use_validation_data=False):
     else:
         x_train = feature_matrix.copy()
         training_mean = np.mean(x_train, axis=0)
-        training_std = np.std(x_train, axis=0)
         x_train -= training_mean
+        training_std = np.std(x_train, axis=0)
         x_train /= training_std
         train_labels = labels
         x_valid = []
