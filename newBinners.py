@@ -94,9 +94,9 @@ class Binner(abc.ABC):
         current_epoch = 0
         random.seed(2)
         epochs = self.pretraining_params['epochs']
-        epochs.append(1000)
+        #epochs.append(1000)
         batch_sizes = self.pretraining_params['batch_sizes']
-        batch_sizes.append(self.x_train.shape[0])
+        #batch_sizes.append(self.x_train.shape[0])
         print(epochs, batch_sizes)
 
         for epochs_to_run, batch_size in zip(epochs, batch_sizes):

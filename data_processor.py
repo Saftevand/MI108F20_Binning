@@ -119,7 +119,6 @@ def get_featurematrix(args, labels=None):
     return feature_matrix, contig_ids, x_train, x_valid, train_labels, validation_labels
 
 def preprocess_data(tnfs, depths, labels=None, use_validation_data=False):
-
     tnf_shape = tnfs.shape[1]
     depth_shape = depths.shape[1]
     number_of_features = tnf_shape + depth_shape
@@ -127,16 +126,24 @@ def preprocess_data(tnfs, depths, labels=None, use_validation_data=False):
     depth_weight = depth_shape / number_of_features
     weighted_tnfs = tnfs * tnf_weight
     weighted_depths = depths * depth_weight
-
-    # feature_matrix = np.hstack([weighted_tnfs, weighted_depths])
+    depths = normalize(depths, axis=1, norm='l1')
+    tnfs = normalize(tnfs, axis=1, norm='l1')
     feature_matrix = np.hstack([tnfs, depths])
+    tnfs_mean = np.mean(tnfs, axis=0)
+    tnfs -= tnfs_mean
+    tnfs_std = np.std(tnfs, axis=0)
+    tnfs /= tnfs_std
+    x_train = np.hstack([tnfs, depths])
+    train_labels = labels
+    x_valid = []
+    validation_labels = []
+    '''
     if use_validation_data:
         x_train, x_valid, train_labels, validation_labels = train_test_split(feature_matrix, labels, test_size=0.2, shuffle=True,random_state=2)
         training_mean = np.mean(x_train, axis=0)
-        x_train -= training_mean
         training_std = np.std(x_train, axis=0)
+        x_train -= training_mean
         x_train /= training_std
-
         x_valid -= training_mean
         x_valid /= training_std
         feature_matrix -= training_mean
@@ -147,9 +154,7 @@ def preprocess_data(tnfs, depths, labels=None, use_validation_data=False):
         x_train -= training_mean
         training_std = np.std(x_train, axis=0)
         x_train /= training_std
-        train_labels = labels
-        x_valid = []
-        validation_labels = []
+    '''
     return feature_matrix, x_train, x_valid, train_labels, validation_labels
 
 

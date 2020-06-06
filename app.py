@@ -21,10 +21,10 @@ matplotlib.use('Agg')
 pretrain_params = {
         'learning_rate': 0.001,
         'reconst_loss': 'mae',
-        'layer_size': 200,
+        'layer_size': 100,
         'num_hidden_layers': 4,
         'embedding_neurons': 32,
-        'epochs': [200, 800, 3000],
+        'epochs': [100, 100, 100],
         'batch_sizes': [256, 512, 4096],
         #'epochs': [5, 5, 5],
         #'batch_sizes': [1024, 2048, 4096],
@@ -33,13 +33,13 @@ pretrain_params = {
         'initializer': 'he_normal',
         'optimizer': 'Adam',
         'denoise': False,
-        'dropout': True,
+        'dropout': False,
         'drop_and_denoise_rate': 0.1,
         'BN': False,
         'sparseKLweight': 0.8,
         'sparseKLtarget': 0.1,
         'jacobian_weight': 1e-4,
-        'callback_interval': 1000
+        'callback_interval': 100
     }
 clust_params = {
     'learning_rate': 0.001,
@@ -86,7 +86,7 @@ def run_on_windows(config, pretraining_params, clust_param):
     run_amber(binner_instance.log_dir)
 
 
-    #run_amber('/home/SimonLinnebjerg/MI108F20_Binning/')
+    # run_amber('/home/SimonLinnebjerg/MI108F20_Binning/')
 
 
 def load_training_config(config_path):
