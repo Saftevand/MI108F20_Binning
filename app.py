@@ -17,6 +17,7 @@ import newBinners
 import os
 import matplotlib
 import time as time
+import joblib
 from collections import Counter
 
 matplotlib.use('Agg')
@@ -56,13 +57,12 @@ clust_params = {
     'clust_loss': 'mae', #virker ikke for stacked --> default = gaussianloss
     'cuda': True,
     'eps': 0.5,
-    'min_samples': 3,
-    'min_cluster_size': 10,
+    'min_samples': 1,
+    'min_cluster_size': 2,
     'callback_interval': 5
 }
 
 def run_on_windows(config, pretraining_params, clust_param):
-
 
     pretraining_params = pretraining_params
     clustering_params = clust_param
@@ -88,26 +88,33 @@ def run_on_windows(config, pretraining_params, clust_param):
 
     #binner_instance.do_binning(load_model=False, load_clustering_AE=False)
 
-    encoded_data = np.load('STACKED_Epoch_180.npy')
+    encoded_data = np.load('STACKED_Epoch_361.npy')
 
-    print(time.strftime('%H:%M:%S'))
-    hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=binner_instance.clust_params['min_cluster_size'],
-                                       min_samples=binner_instance.clust_params['min_samples'], core_dist_n_jobs=36)
-    binner_instance.bins = hdbscan_instance.fit_predict(encoded_data)
-    print(time.strftime('%H:%M:%S'))
+    # https://github.com/scikit-learn-contrib/hdbscan/issues/292 how to HDBSCAN joblib
+    mem = joblib.Memory(cachedir='/home/SimonLinnebjerg/MI108F20_Binning/cache_joblib/')
 
-    bins = binner_instance.get_assignments(include_outliers=False)
+    min_samples = 3
+    min_c_size = [2,3,4,5,6,7,8,9,10]
+    num_clusters = []
 
+    for clust_size in min_c_size:
+        print('Start')
+        print(time.strftime('%H:%M:%S'))
+        hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=clust_size, min_samples=min_samples, core_dist_n_jobs=36,
+                                           memory=mem).fit(encoded_data)
+        labels = hdbscan_instance.labels_
+        binner_instance.bins = labels
+        print(Counter(labels))
+        num_clusters.append(max(labels))
+        print('Finish')
+        print(time.strftime('%H:%M:%S'))
+        bins = binner_instance.get_assignments(include_outliers=False)
+        data_processor.write_bins_to_file(bins,
+                                          f'/home/SimonLinnebjerg/MI108F20_Binning/Comparison/T2_mS{min_samples}_mC{clust_size}_')
+    print('Num clusters:')
+    print(num_clusters)
 
-
-    data_processor.write_bins_to_file(bins, f'/home/SimonLinnebjerg/MI108F20_Binning/Comparison/mS{clust_params["min_samples"]}_mC{clust_params["min_cluster_size"]}_')
     #run_amber(binner_instance.log_dir)
-    list_bins = bins.tolist()
-    print(Counter(list_bins))
-    print(f'Num bins: {max(list_bins)}')
-
-
-
     run_amber('/home/SimonLinnebjerg/MI108F20_Binning/Comparison/')
 
 
