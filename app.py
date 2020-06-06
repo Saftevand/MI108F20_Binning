@@ -24,8 +24,8 @@ pretrain_params = {
         'layer_size': 200,
         'num_hidden_layers': 4,
         'embedding_neurons': 32,
-        'epochs': [200, 200, 200],
-        'batch_sizes': [512, 1024, 4048],
+        'epochs': [200, 800],
+        'batch_sizes': [256, 512],
         #'epochs': [5, 5, 5],
         #'batch_sizes': [1024, 2048, 4096],
         'activation_fn': 'elu',
@@ -39,7 +39,7 @@ pretrain_params = {
         'sparseKLweight': 0.5,
         'sparseKLtarget': 0.1,
         'jacobian_weight': 1e-4,
-        'callback_interval': 100
+        'callback_interval': 500
     }
 clust_params = {
     'learning_rate': 0.0001,
@@ -60,7 +60,7 @@ clust_params = {
 
 def run_on_windows(config, pretraining_params, clust_param):
 
-
+    '''
     pretraining_params = pretraining_params
     clustering_params = clust_param
 
@@ -68,15 +68,15 @@ def run_on_windows(config, pretraining_params, clust_param):
         pretraining_params, clustering_params = load_training_config(config)
 
 
-    dataset_path = '/home/SimonLinnebjerg/datasets/cami_airways'
+    dataset_path = '/home/lasse/datasets/cami_high'
     #dataset_path = 'D:/datasets/cami_airways'
     tnfs, contig_ids, depth = data_processor.load_data_local(dataset_path)
-    #ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
-    #    os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
-    #labels = list(contig_id_binid_sorted.values())
-    labels = []
+    ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
+        os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
+    labels = list(contig_id_binid_sorted.values())
+    #labels = []
     feature_matrix, x_train, x_valid, train_labels, validation_labels, num_samples = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels, use_validation_data=False)
-
+    #np.save('feature_matrix', feature_matrix)
     binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix, num_samples=num_samples,
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid,
                                                train_labels=train_labels, validation_labels=validation_labels,
@@ -89,8 +89,8 @@ def run_on_windows(config, pretraining_params, clust_param):
     data_processor.write_bins_to_file(bins)
     #run_amber(binner_instance.log_dir)
 
-
-    #run_amber('/home/SimonLinnebjerg/MI108F20_Binning/Comparison/')
+    '''
+    run_amber('/home/lasse/MI108F20_Binning/Logs/run_2020_06_06-12_27_45_STACKED/')
 
 
 def load_training_config(config_path):
@@ -105,13 +105,13 @@ def run_amber(path):
     labels = [label.split('/')[-1].split('binning')[0] for label in labels]
     paths_to_results = [os.path.abspath(x) for x in glob.glob(directory_of_files)]
     gold_standard_file = os.path.join(os.path.abspath(path), '*ground_truth_with_length.tsv')
-    #unique_common_file = os.path.abspath('unique_common.tsv')
+    unique_common_file = os.path.abspath('unique_common.tsv')
     outdir_with_circular = os.path.join(path, 'amber_with_circular')
-    #outdir_without_circular = os.path.join(path, 'amber_without_circular')
-    #command_amber_without_circular = f'amber.py -g {gold_standard_file} -l "{", ".join(labels)}" -r {unique_common_file} -k "circular element" {" ".join(paths_to_results)} -o {outdir_without_circular}'
+    outdir_without_circular = os.path.join(path, 'amber_without_circular')
+    command_amber_without_circular = f'amber.py -g {gold_standard_file} -l "{", ".join(labels)}" -r {unique_common_file} -k "circular element" {" ".join(paths_to_results)} -o {outdir_without_circular}'
     command_amber_with_circular = f'amber.py -g {gold_standard_file} -l "{", ".join(labels)}" {" ".join(paths_to_results)} -o {outdir_with_circular}'
     os.system(command_amber_with_circular)
-    #os.system(command_amber_without_circular)
+    os.system(command_amber_without_circular)
 
 def hdbscan_non_embedded_data(data, binner):
     hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=clust_params['min_cluster_size'], min_samples=clust_params['min_samples'], core_dist_n_jobs=36)

@@ -151,19 +151,33 @@ def preprocess_data(tnfs, depths, labels=None, use_validation_data=False):
     x_train /= training_std
     '''
 
+    '''
     normalized_depth = normalize(depths, axis=1, norm='l1')
-
+    normalized_tnfs = normalize(tnfs, axis=1, norm='l1')
+    
     train_labels = labels
     x_valid = []
     validation_labels = []
     tnfs_train = tnfs.copy()
     tnfs_train -= np.mean(tnfs_train, axis=0)
     tnfs_train /= np.std(tnfs_train, axis=0)
+    '''
+    normalized_depth = normalize(depths, axis=1, norm='l1')
+    normalized_tnfs = normalize(tnfs, axis=1, norm='l1')
 
-    feature_matrix = np.hstack([tnfs_train, normalized_depth])
+    feature_matrix = np.hstack([normalized_tnfs, normalized_depth])
+    training_mean = np.mean(feature_matrix, axis=0)
+    feature_matrix -= training_mean
+    training_std = np.std(feature_matrix, axis=0)
+    feature_matrix /= training_std
+
     x_train = feature_matrix
 
-    return feature_matrix, x_train, x_valid, train_labels, validation_labels
+    train_labels = labels
+    x_valid = []
+    validation_labels = []
+
+    return feature_matrix, x_train, x_valid, train_labels, validation_labels, depth_shape
 
 
 def get_train_and_validation_data(feature_matrix, split_value=0.8):
