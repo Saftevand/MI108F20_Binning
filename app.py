@@ -24,8 +24,8 @@ pretrain_params = {
         'layer_size': 100,
         'num_hidden_layers': 4,
         'embedding_neurons': 32,
-        'epochs': [100, 100, 100],
-        'batch_sizes': [256, 512, 4096],
+        'epochs': [100],
+        'batch_sizes': [256],
         #'epochs': [5, 5, 5],
         #'batch_sizes': [1024, 2048, 4096],
         'activation_fn': 'elu',
@@ -60,19 +60,23 @@ clust_params = {
 
 def run_on_windows(config, pretraining_params, clust_param):
 
+
     pretraining_params = pretraining_params
     clustering_params = clust_param
 
     if config:
         pretraining_params, clustering_params = load_training_config(config)
 
-
-    dataset_path = '/home/SimonLinnebjerg/datasets/cami_high'
-    #dataset_path = 'D:/datasets/cami_high'
+    dataset_path = '/home/lasse/datasets/cami_medium'
+    #dataset_path = '/home/lasse/datasets/cami_medium'
+    #dataset_path = 'D:/datasets/cami_medium'
     tnfs, contig_ids, depth = data_processor.load_data_local(dataset_path)
-    ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
-        os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
-    labels = list(contig_id_binid_sorted.values())
+    pretraining_params['number_of_samples'] = depth.shape[1]
+    print(pretraining_params['number_of_samples'])
+    #ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
+    #    os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
+    #labels = list(contig_id_binid_sorted.values())
+    labels = []
     feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels, use_validation_data=False)
 
     binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix,
@@ -81,13 +85,14 @@ def run_on_windows(config, pretraining_params, clust_param):
 
     binner_instance.do_binning(load_model=False, load_clustering_AE=False)
 
-    bins = binner_instance.get_assignments(include_outliers=False)
-    data_processor.write_bins_to_file(bins)
-    run_amber(binner_instance.log_dir)
+    #bins = binner_instance.get_assignments(include_outliers=False)
+    #data_processor.write_bins_to_file(bins)
+    #hdbscan_non_embedded_data(binner=binner_instance)
+    run_amber(binner_instance.log_dir, cami_medium=True)
 
+    #run_amber('/home/lasse/MI108F20_Binning/Logs/run_2020_06_06-14_29_29_STACKED/')
 
-    # run_amber('/home/SimonLinnebjerg/MI108F20_Binning/')
-
+    #run_amber('/home/lasse/MI108F20_Binning/HDBSCAN_results/cami_medium/', cami_medium=True)
 
 def load_training_config(config_path):
     with open(config_path, 'r') as config:
@@ -95,13 +100,22 @@ def load_training_config(config_path):
         return params['pretraining_params'], params['clust_params']
 
 
-def run_amber(path):
+def run_amber(path, cami_high=False, cami_medium=False, cami_airways=False):
+
     directory_of_files = os.path.join(os.path.abspath(path), "*binning_results.tsv")
     labels = glob.glob(directory_of_files)
     labels = [label.split('/')[-1].split('binning')[0] for label in labels]
     paths_to_results = [os.path.abspath(x) for x in glob.glob(directory_of_files)]
-    gold_standard_file = os.path.abspath('ground_truth_with_length.tsv')
-    unique_common_file = os.path.abspath('unique_common.tsv')
+    if cami_high:
+        gold_standard_file = os.path.abspath('ground_truth_with_length_cami_high.tsv')
+        unique_common_file = os.path.abspath('unique_common_cami_high.tsv')
+    elif cami_medium:
+        gold_standard_file = os.path.abspath('ground_truth_with_length_cami_medium.tsv')
+        unique_common_file = os.path.abspath('unique_common_cami_medium.tsv')
+    elif cami_airways:
+        gold_standard_file = os.path.abspath('ground_truth_with_length_cami_airways.tsv')
+    else:
+        return
     outdir_with_circular = os.path.join(path, 'amber_with_circular')
     outdir_without_circular = os.path.join(path, 'amber_without_circular')
     command_amber_without_circular = f'amber.py -g {gold_standard_file} -l "{", ".join(labels)}" -r {unique_common_file} -k "circular element" {" ".join(paths_to_results)} -o {outdir_without_circular}'
@@ -109,10 +123,28 @@ def run_amber(path):
     os.system(command_amber_with_circular)
     os.system(command_amber_without_circular)
 
-def hdbscan_non_embedded_data(data, binner):
-    hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=clust_params['min_cluster_size'], min_samples=clust_params['min_samples'], core_dist_n_jobs=36)
-    all_assignments = hdbscan_instance.fit_predict(data)
+
+def hdbscan_non_embedded_data(binner):
+
+    hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=binner.clust_params['min_cluster_size'],
+                                       min_samples=binner.clust_params['min_samples'], core_dist_n_jobs=36)
+    all_assignments = hdbscan_instance.fit_predict(binner.x_train)
     binner.bins = all_assignments
+    bins_without_outliers = binner.get_assignments(include_outliers=False)
+    data_processor.write_bins_to_file(bins_without_outliers,
+                                      output_dir='HDBSCAN_normalized_original')
+    # self.binner.autoencoder.save(os.path.join(self.binner.log_dir, f'{self.prefix}Epoch_{epoch}'))
+
+
+    # RUN unnormalized
+
+    hdbscan_instance1 = hdbscan.HDBSCAN(min_cluster_size=binner.clust_params['min_cluster_size'],
+                                        min_samples=binner.clust_params['min_samples'], core_dist_n_jobs=36)
+    all_assignments = hdbscan_instance1.fit_predict(binner.feature_matrix)
+    binner.bins = all_assignments
+    bins_without_outliers = binner.get_assignments(include_outliers=False)
+    data_processor.write_bins_to_file(bins_without_outliers, output_dir='HDBSCAN_unnormalized_original')
+
 
 
 def main():

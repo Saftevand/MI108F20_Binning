@@ -17,6 +17,7 @@ import hdbscan
 import json
 import data_processor
 import subprocess
+import seaborn as sns
 import random
 
 
@@ -59,6 +60,70 @@ class Binner(abc.ABC):
     @abc.abstractmethod
     def create_autoencoder(self):
         pass
+
+    def loss_fn(self):
+        number_of_samples = self.pretraining_params['number_of_samples']
+        def loss(y_pred, y_true):
+            s = number_of_samples
+            y_true_tnfs = y_true[:, :-s]
+            y_true_abd = y_true[:, -s:]
+
+            y_pred_tnfs = y_pred[:, :-s]
+            y_pred_abd = y_pred[:, -s:]
+
+            # TNF error
+            # tnf_diff = tf.abs(y_true_tnfs - y_pred_tnfs)
+
+            # tnf_err = tf.reduce_mean(tf.reduce_sum(tnf_diff, axis=1))
+            tnf_err = tf.losses.MAE(y_pred_tnfs, y_true_tnfs)
+
+            # ABUNDANCE error
+            # abd_diff = tf.abs(y_true_abd - y_pred_abd)
+            # abd_err = tf.reduce_mean(tf.reduce_sum(abd_diff, axis=1))
+            abd_err = tf.losses.MAE(y_pred_abd, y_true_abd)
+            # total_abd_err = tf.reduce_sum(-(tf.math.log(y_pred_abd + 1e-9)) * y_true_abd, axis=1)
+
+            # ratio = np.ceil(num_tnfs / s)
+            # loss = tnf_err/ s + abd_err
+            # loss = (tnf_err / (s + num_tnfs)) + abd_err
+            loss = tnf_err / s + abd_err
+            return loss
+        return loss
+
+    def sensitivity(self, tnf_feature_size=136, abundance_feature_size=2):
+
+        dataset_variable = tf.Variable(self.x_train)
+        with tf.GradientTape() as tape:
+            reconstructed = self.autoencoder(dataset_variable, training=True)
+            #loss = tf.reduce_mean(tf.keras.losses.MAE(dataset_variable, reconstructed))
+            loss = self.loss_fn()(dataset_variable, reconstructed)
+        gradients = tape.gradient(loss, dataset_variable)
+        gradients = tf.reduce_mean(tf.abs(gradients), 0)
+        number_of_features = self.feature_matrix.shape[1]
+
+        tnf_feature = [f'TNF\n{e}' for e in range(1, tnf_feature_size + 1)]
+        abundance_feature = [f'ABD\n{e}' for e in range(1, number_of_features - (tnf_feature_size - 1))]
+        shape = int(np.ceil(np.sqrt(number_of_features)))
+        labels = tnf_feature + abundance_feature
+        labels += list(range(0, (shape * shape) - number_of_features))
+        mask = np.zeros(shape * shape, dtype=bool)
+        for index in range(number_of_features, shape * shape):
+            mask[index] = True
+        mask = mask.reshape(shape, shape)
+        labels = np.asarray(labels).reshape(shape, shape)
+        gradient_list = np.asarray(gradients.numpy()).tolist()
+        max_gradient = max(gradient_list)
+        min_gradient = min(gradient_list)
+        for _ in range((shape * shape) - number_of_features):
+            gradient_list.append(0.0)
+        np_gradients = np.asarray(gradient_list).reshape(shape, shape)
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax = sns.heatmap(np_gradients, ax=ax, vmin=min_gradient, vmax=max_gradient, annot=labels, fmt='', mask=mask)
+        bottom, top = ax.get_ylim()
+        ax.set_ylim(bottom + 0.5, top - 0.5)
+        # plt.show()
+        plt.savefig('sensitivity.png')
+        return gradients
 
     def get_assignments(self, include_outliers=False):
 
@@ -132,6 +197,7 @@ class Binner(abc.ABC):
                 current_epoch += 1
         for callback in callbacks:
             callback.on_train_end()
+        #self.sensitivity()
 
     def include_clustering_loss(self):
         output_of_input = self.autoencoder.layers[0].output
@@ -284,34 +350,10 @@ class Stacked_Binner(Binner):
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
-        def loss_fn(y_pred, y_true):
-            s = 5
-            y_true_tnfs = y_true[:, :-s]
-            y_true_abd = y_true[:, -s:]
 
-            y_pred_tnfs = y_pred[:, :-s]
-            y_pred_abd = y_pred[:, -s:]
 
-            # TNF error
-            #tnf_diff = tf.abs(y_true_tnfs - y_pred_tnfs)
-
-            #tnf_err = tf.reduce_mean(tf.reduce_sum(tnf_diff, axis=1))
-            tnf_err = tf.losses.MAE(y_pred_tnfs, y_true_tnfs)
-
-            # ABUNDANCE error
-            #abd_diff = tf.abs(y_true_abd - y_pred_abd)
-            #abd_err = tf.reduce_mean(tf.reduce_sum(abd_diff, axis=1))
-            abd_err = tf.losses.MAE(y_pred_abd, y_true_abd)
-            # total_abd_err = tf.reduce_sum(-(tf.math.log(y_pred_abd + 1e-9)) * y_true_abd, axis=1)
-
-            # ratio = np.ceil(num_tnfs / s)
-            # loss = tnf_err/ s + abd_err
-            # loss = (tnf_err / (s + num_tnfs)) + abd_err
-            loss = tnf_err/s + abd_err
-            return loss
-
-        stacked_ae.compile(optimizer=optimizer, loss=loss_fn)
-
+        #stacked_ae.compile(optimizer=optimizer, loss=self.loss_fn())
+        stacked_ae.compile(optimizer=optimizer, loss='mae')
         print(stacked_ae.summary())
         self.autoencoder = stacked_ae
         self.encoder = self.extract_encoder()
@@ -669,6 +711,7 @@ class Sparse_Binner(Stacked_Binner):
         return self.bins
         '''
 
+
 class Contractive_Binner(Stacked_Binner):
     def __init__(self, name, contig_ids, feature_matrix, labels=None, x_train=None,
                  x_valid=None, train_labels=None,validation_labels=None, pretraining_params=None, clust_params=None):
@@ -722,11 +765,38 @@ class Contractive_Binner(Stacked_Binner):
 
     def pretraining(self, callbacks):
 
-        file_writer = tf.summary.create_file_writer(self.log_dir)
 
+        def loss_fn(y_pred, y_true):
+            s = 5
+            y_true_tnfs = y_true[:, :-s]
+            y_true_abd = y_true[:, -s:]
+
+            y_pred_tnfs = y_pred[:, :-s]
+            y_pred_abd = y_pred[:, -s:]
+
+            # TNF error
+            #tnf_diff = tf.abs(y_true_tnfs - y_pred_tnfs)
+
+            #tnf_err = tf.reduce_mean(tf.reduce_sum(tnf_diff, axis=1))
+            tnf_err = tf.losses.MAE(y_pred_tnfs, y_true_tnfs)
+
+            # ABUNDANCE error
+            #abd_diff = tf.abs(y_true_abd - y_pred_abd)
+            #abd_err = tf.reduce_mean(tf.reduce_sum(abd_diff, axis=1))
+            abd_err = tf.losses.MAE(y_pred_abd, y_true_abd)
+            # total_abd_err = tf.reduce_sum(-(tf.math.log(y_pred_abd + 1e-9)) * y_true_abd, axis=1)
+
+            # ratio = np.ceil(num_tnfs / s)
+            # loss = tnf_err/ s + abd_err
+            # loss = (tnf_err / (s + num_tnfs)) + abd_err
+            loss = tnf_err/s + abd_err
+            return loss
+
+        file_writer = tf.summary.create_file_writer(self.log_dir)
         jacobian_losses = []
         reconstruction_losses = []
         combined_losses = []
+        random.seed(2)
         x_train = tf.data.Dataset.from_tensor_slices(self.x_train)
         loss_function = tf.keras.losses.get(self.autoencoder.loss)
         optimizer = tf.optimizers.Adam(self.pretraining_params['learning_rate'])
@@ -738,9 +808,9 @@ class Contractive_Binner(Stacked_Binner):
 
         for epochs_to_run, batch_size in zip(self.pretraining_params['epochs'],
                                              self.pretraining_params['batch_sizes']):
-
+            epoch_seed = random.randint(0, 40000)
             for epoch in range(epochs_to_run):
-                training_set = x_train.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
+                training_set = x_train.shuffle(buffer_size=40000, seed=epoch_seed).repeat().batch(batch_size)
                 for batch in training_set:
                     trained_samples += batch_size
 
@@ -755,7 +825,7 @@ class Contractive_Binner(Stacked_Binner):
                         jacobian_loss = tf.reduce_sum(mean_grads ** 2)
 
                         reconstruction = decoder(embedding, training=True)
-                        reconstruction_loss = tf.reduce_mean(loss_function(batch, reconstruction))
+                        reconstruction_loss = loss_fn(batch, reconstruction)
                         loss = tf.add_n([reconstruction_loss + weight * jacobian_loss] + self.autoencoder.losses)
 
                     reconstruction_losses.append(reconstruction_loss)
@@ -771,8 +841,7 @@ class Contractive_Binner(Stacked_Binner):
 
                 # Epoch over - get metrics
 
-                reconstruction = self.autoencoder(self.x_valid, training=False)
-                validation_loss = np.mean(loss_function(reconstruction, self.x_valid))
+
                 mean_jacobian = np.mean(jacobian_losses)
                 mean_reconstruction = np.mean(reconstruction_losses)
                 mean_combined = np.mean(combined_losses)
@@ -783,7 +852,6 @@ class Contractive_Binner(Stacked_Binner):
                     tf.summary.scalar('Training_reconstruction_loss', mean_reconstruction, step=current_epoch + 1)
                     tf.summary.scalar('Training_total_loss', mean_combined, step=current_epoch + 1)
 
-                    tf.summary.scalar('Validation_reconstruction_loss', validation_loss, step=current_epoch + 1)
                 jacobian_losses.clear(), reconstruction_losses.clear(), combined_losses.clear()
                 if (current_epoch + 1) % self.pretraining_params['callback_interval'] == 0:
                     for callback in callbacks:
@@ -791,7 +859,6 @@ class Contractive_Binner(Stacked_Binner):
                 current_epoch += 1
         for callback in callbacks:
             callback.on_train_end()
-
 
     def fit_dbscan(self, callbacks):
         x = self.feature_matrix
@@ -933,6 +1000,7 @@ class Contractive_Binner(Stacked_Binner):
             callback.on_train_end()
         tensorboard.on_train_end(None)
 
+
 class GaussianLoss(tf.keras.losses.Loss):
     def __init__(self, bandwidth=1, **kwargs):
         self.bandwidth = bandwidth
@@ -951,6 +1019,7 @@ class GaussianLoss(tf.keras.losses.Loss):
     def get_config(self):
         return {"bandwidth": self.bandwidth}
 
+
 class KLDivergenceRegularizer(tf.keras.regularizers.Regularizer):
     def __init__(self, weight, target=0.1, **kwargs):
         self.weight = weight
@@ -964,6 +1033,7 @@ class KLDivergenceRegularizer(tf.keras.regularizers.Regularizer):
 
     def get_config(self):
         return {"weight" : self.weight, "target" : self.target}
+
 
 
 def create_binner(binner_type, contig_ids, feature_matrix, labels=None, x_train=None, x_valid=None, train_labels=None,
@@ -1132,6 +1202,7 @@ class WriteBinsCallback(tf.keras.callbacks.Callback):
 
             #self.binner.autoencoder.save(os.path.join(self.binner.log_dir, f'{self.prefix}Epoch_{epoch}'))
 
+
 def plot_to_image(figure):
     """Converts the matplotlib plot specified by 'figure' to a PNG image and
     returns it. The supplied figure is closed and inaccessible after this call."""
@@ -1147,6 +1218,7 @@ def plot_to_image(figure):
     # Add the batch dimension
     image = tf.expand_dims(image, 0)
     return image
+
 
 binner_dict = {
     'STACKED': Stacked_Binner,
