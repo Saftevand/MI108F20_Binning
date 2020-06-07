@@ -21,7 +21,7 @@ matplotlib.use('Agg')
 pretrain_params = {
         'learning_rate': 0.001,
         'reconst_loss': 'mae',
-        'layer_size': 100,
+        'layer_size': 200,
         'num_hidden_layers': 4,
         'embedding_neurons': 32,
         'epochs': [100],
@@ -36,10 +36,10 @@ pretrain_params = {
         'dropout': False,
         'drop_and_denoise_rate': 0.1,
         'BN': False,
-        'sparseKLweight': 0.8,
+        'sparseKLweight': 0.5,
         'sparseKLtarget': 0.1,
         'jacobian_weight': 1e-4,
-        'callback_interval': 100
+        'callback_interval': 500
     }
 clust_params = {
     'learning_rate': 0.001,
@@ -55,7 +55,7 @@ clust_params = {
     'eps': 0.5,
     'min_samples': 2,
     'min_cluster_size': 6,
-    'callback_interval': 5
+    'callback_interval': 500
 }
 
 def run_on_windows(config, pretraining_params, clust_param):
@@ -104,6 +104,7 @@ def run_amber(path, cami_high=False, cami_medium=False, cami_airways=False):
 
     directory_of_files = os.path.join(os.path.abspath(path), "*binning_results.tsv")
     labels = glob.glob(directory_of_files)
+    print(labels)
     labels = [label.split('/')[-1].split('binning')[0] for label in labels]
     paths_to_results = [os.path.abspath(x) for x in glob.glob(directory_of_files)]
     if cami_high:

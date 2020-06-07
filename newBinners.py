@@ -45,7 +45,17 @@ class Binner(abc.ABC):
         self.encoder = None
         self.clustering_autoencoder = None
 
-        self.log_dir = os.path.join('Logs', f'{time.strftime("run_%Y_%m_%d-%H_%M_%S")}_{self.name}')
+        # self.log_dir = os.path.join('Logs', f'{time.strftime("run_%Y_%m_%d-%H_%M_%S")}_{self.name}')
+        # bedre formatering
+        if self.pretraining_params["dropout"] or self.pretraining_params["denoise"]:
+            dr = self.pretraining_params["drop_and_denoise_rate"]
+        else:
+            dr = 0
+        self.formatted = f'{self.pretraining_params["num_hidden_layers"]}x{self.pretraining_params["layer_size"]}-{self.pretraining_params["embedding_neurons"]}_Drp:{dr}_Lr:{self.pretraining_params["learning_rate"]}_{time.strftime("run_%d-%H_%M_%S")}'
+        eps = [str(x) for x in self.pretraining_params["epochs"]]
+        btch = [str(x) for x in self.pretraining_params["batch_sizes"]]
+        extra = f'_Eps[{",".join(eps)}]_Batch[{",".join(btch)}]'
+        self.log_dir = os.path.join('Logs', self.name + '_' + self.formatted )#+ extra + '/')
         self.bins = None
 
 
@@ -667,7 +677,33 @@ class Sparse_Binner(Stacked_Binner):
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
-        stacked_ae.compile(optimizer=optimizer, loss=reconst_loss)
+        def loss_fn(y_pred, y_true):
+            s = 5
+            y_true_tnfs = y_true[:, :-s]
+            y_true_abd = y_true[:, -s:]
+
+            y_pred_tnfs = y_pred[:, :-s]
+            y_pred_abd = y_pred[:, -s:]
+
+            # TNF error
+            #tnf_diff = tf.abs(y_true_tnfs - y_pred_tnfs)
+
+            #tnf_err = tf.reduce_mean(tf.reduce_sum(tnf_diff, axis=1))
+            tnf_err = tf.losses.MAE(y_pred_tnfs, y_true_tnfs)
+
+            # ABUNDANCE error
+            #abd_diff = tf.abs(y_true_abd - y_pred_abd)
+            #abd_err = tf.reduce_mean(tf.reduce_sum(abd_diff, axis=1))
+            abd_err = tf.losses.MAE(y_pred_abd, y_true_abd)
+            # total_abd_err = tf.reduce_sum(-(tf.math.log(y_pred_abd + 1e-9)) * y_true_abd, axis=1)
+
+            # ratio = np.ceil(num_tnfs / s)
+            # loss = tnf_err/ s + abd_err
+            # loss = (tnf_err / (s + num_tnfs)) + abd_err
+            loss = tnf_err/s + abd_err
+            return loss
+
+        stacked_ae.compile(optimizer=optimizer, loss=loss_fn)
 
         print(stacked_ae.summary())
 
@@ -1184,9 +1220,9 @@ class WriteBinsCallback(tf.keras.callbacks.Callback):
         super().__init__()
         self.binner = binner
         if clustering_ae:
-            self.prefix = f'DC_{binner.name}_'
+            self.prefix = f'DC_{binner.name}'
         else:
-            self.prefix =f'{binner.name}_'
+            self.prefix =f'{binner.name}'
         self.clustering_ae = clustering_ae
 
     def on_epoch_end(self, epoch, logs=None):
@@ -1198,7 +1234,8 @@ class WriteBinsCallback(tf.keras.callbacks.Callback):
             all_assignments = hdbscan_instance.fit_predict(data)
             self.binner.bins = all_assignments
             bins_without_outliers = self.binner.get_assignments(include_outliers=False)
-            data_processor.write_bins_to_file(bins_without_outliers, output_dir=os.path.join(self.binner.log_dir, f'{self.prefix}Epoch_{epoch}'))
+            #Her
+            data_processor.write_bins_to_file(bins_without_outliers, output_dir=os.path.join(self.binner.log_dir, f'{self.prefix}_Ep:{epoch}_{self.binner.formatted}_'))
 
             #self.binner.autoencoder.save(os.path.join(self.binner.log_dir, f'{self.prefix}Epoch_{epoch}'))
 
