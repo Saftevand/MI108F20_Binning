@@ -1,4 +1,4 @@
-#import vamb
+import vamb
 import numpy as np
 from sklearn.preprocessing import normalize
 import os

@@ -143,10 +143,15 @@ class Binner(abc.ABC):
             outlier_mask = np.ones(self.bins.shape[0], dtype=bool)
 
         try:
-            result = np.vstack([self.contig_ids[outlier_mask], self.bins[outlier_mask]])
+            if type(self.contig_ids) is not type(self.bins):
+                temp_contigs = np.array(self.contig_ids)
+                result = np.vstack([temp_contigs[outlier_mask], self.bins[outlier_mask]])
+            else:
+                result = np.vstack([self.contig_ids[outlier_mask], self.bins[outlier_mask]])
         except:
             print('Could not combine contig ids with bin assignment')
-            print('\nContig IDs:', self.contig_ids, '\nBins:', self.bins)
+            print('\nContig IDs:', len(self.contig_ids), '\nBins:', len(self.bins))
+            print('contig id: ', str(type(self.contig_ids)), ' bins: ',str(type(self.bins)))
             sys.exit('\nProgram finished without results')
         return result
 
