@@ -24,7 +24,7 @@ pretrain_params = {
         'layer_size': 200,
         'num_hidden_layers': 4,
         'embedding_neurons': 32,
-        'epochs': [100],
+        'epochs': [1],
         'batch_sizes': [256],
         #'epochs': [5, 5, 5],
         #'batch_sizes': [1024, 2048, 4096],
@@ -34,17 +34,18 @@ pretrain_params = {
         'optimizer': 'Adam',
         'denoise': False,
         'dropout': False,
-        'drop_and_denoise_rate': 0.1,
+        'drop_and_denoise_rate': 0.2,
         'BN': False,
-        'sparseKLweight': 0.5,
-        'sparseKLtarget': 0.1,
-        'jacobian_weight': 1e-4,
-        'callback_interval': 500
+        'sparseKLweight': 0.1,
+        'sparseKLtarget': 0.05,
+        'jacobian_weight': 1e-3,
+        'callback_interval': 1,
+        'abd_weight': 2
     }
 clust_params = {
     'learning_rate': 0.001,
     'optimizer': 'Adam',
-    'loss_weights': [1, 0.1],  # [reconstruction, clustering]
+    'loss_weights': [1, 0.05],  # [reconstruction, clustering]
     'gaussian_bandwidth': 1,
     'jacobian_weight': 1e-4,
     'clustering_weight': 0.05,
@@ -54,8 +55,8 @@ clust_params = {
     'cuda': True,
     'eps': 0.5,
     'min_samples': 2,
-    'min_cluster_size': 6,
-    'callback_interval': 500
+    'min_cluster_size': 10,
+    'callback_interval': 10
 }
 
 def run_on_windows(config, pretraining_params, clust_param):
@@ -67,19 +68,18 @@ def run_on_windows(config, pretraining_params, clust_param):
     if config:
         pretraining_params, clustering_params = load_training_config(config)
 
-    dataset_path = '/home/lasse/datasets/cami_medium'
-    #dataset_path = '/home/lasse/datasets/cami_medium'
+    dataset_path = '/home/lasse/datasets/cami_high'
     #dataset_path = 'D:/datasets/cami_medium'
     tnfs, contig_ids, depth = data_processor.load_data_local(dataset_path)
     pretraining_params['number_of_samples'] = depth.shape[1]
     print(pretraining_params['number_of_samples'])
-    #ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
-    #    os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
-    #labels = list(contig_id_binid_sorted.values())
-    labels = []
+    ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
+        os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
+    labels = list(contig_id_binid_sorted.values())
+    #labels = []
     feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels, use_validation_data=False)
 
-    binner_instance = newBinners.create_binner(binner_type='STACKED', feature_matrix=feature_matrix,
+    binner_instance = newBinners.create_binner(binner_type='SPARSE', feature_matrix=feature_matrix,
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid ,train_labels=train_labels, validation_labels=validation_labels, clust_params=clustering_params, pretraining_params=pretraining_params)
 
 
@@ -88,12 +88,13 @@ def run_on_windows(config, pretraining_params, clust_param):
     #bins = binner_instance.get_assignments(include_outliers=False)
     #data_processor.write_bins_to_file(bins)
     #hdbscan_non_embedded_data(binner=binner_instance)
-    run_amber(binner_instance.log_dir, cami_medium=True)
+    run_amber(binner_instance.log_dir, cami_high=True)
 
     #run_amber('/home/lasse/MI108F20_Binning/Logs/run_2020_06_06-14_29_29_STACKED/')
 
     #run_amber('/home/lasse/MI108F20_Binning/HDBSCAN_results/cami_medium/', cami_medium=True)
 
+    #run_amber('/home/lasse/MI108F20_Binning/Logs/STACKED_4x200-32_Drp_0_Lr_0.001_run_08-14_03_17/', cami_airways=True)
 def load_training_config(config_path):
     with open(config_path, 'r') as config:
         params = json.load(config)
@@ -114,7 +115,12 @@ def run_amber(path, cami_high=False, cami_medium=False, cami_airways=False):
         gold_standard_file = os.path.abspath('ground_truth_with_length_cami_medium.tsv')
         unique_common_file = os.path.abspath('unique_common_cami_medium.tsv')
     elif cami_airways:
-        gold_standard_file = os.path.abspath('ground_truth_with_length_cami_airways.tsv')
+        gold_standard_file = os.path.abspath('cami_airways_ground_truth_with_length.tsv')
+        outdir_with_circular = os.path.join(path, 'amber_with_circular')
+        command_amber_with_circular = f'amber.py -g {gold_standard_file} -l "{", ".join(labels)}" {" ".join(paths_to_results)} -o {outdir_with_circular}'
+        os.system(command_amber_with_circular)
+        return
+
     else:
         return
     outdir_with_circular = os.path.join(path, 'amber_with_circular')
@@ -209,11 +215,7 @@ def handle_input_arguments():
     group2.add_argument("-b", "--bam", help="Bam files", nargs='+')
     group2.add_argument("-ld", "--loaddepth", help="Path to depth.npy")
 
-    parser.add_argument("-st", "--savepathtnfs", help="Path to save tnfs")
-    parser.add_argument("-sc", "--savepathcontigids", help="Path to save contigids")
-
-    parser.add_argument("-c", "--clustering",nargs='?', default="KMeans_gpu", const="KMeans_gpu", help="Clustering algorithm to be used")
-    parser.add_argument("-bt", "--binnertype",nargs='?', default="SEQ", const="SEQ", help="Binner type to be used")
+    parser.add_argument("-bt", "--binnertype",nargs='?', default="STACKED", const="STACKED", help="Binner type to be used")
     parser.add_argument("-sd", "--savepathdepth", help="Path to save depths")
 
     parser.add_argument("-o", "--outdir", required=True,  help="Path to outdir of bins")

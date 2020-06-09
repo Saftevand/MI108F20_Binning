@@ -186,7 +186,7 @@ class Badass_Binner(Binner):
         print("Loaded autoencoder")
 
 
-    def do_binning(self, load_model=False, lars_load=True):
+    def do_binning(self, load_model=False, lars_load=False):
         if not load_model:
             self.build_pretraining_model([100, 100, 200, 32], False, 4, learning_rate=0.001)  # default adam = 0.001
             self.pretrain(self.feature_matrix, self.labels, batch_size=128, epochs=400, validation_split=0.2, shuffle=True)

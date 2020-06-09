@@ -6,24 +6,23 @@ import tensorflow as tf
 from tensorflow import keras
 import os
 import sklearn
-from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import io
 from collections import Counter
 from tensorboard.plugins import projector
 import matplotlib.ticker as ticker
+from sklearn.preprocessing import normalize
 import hdbscan
 import json
 import data_processor
-import subprocess
 import seaborn as sns
 import random
 
 
 class Binner(abc.ABC):
     def __init__(self, name, contig_ids, feature_matrix=None, labels=None, x_train=None, x_valid=None,
-                 train_labels=None, valid_labels=None, pretraining_params=None, clust_params=None):
+                 train_labels=None, valid_labels=None, pretraining_params=None, clust_params=None, debug=False):
         self.input_shape = x_train.shape[1]
         self.training_set_size = x_train.shape[0]
         #self.validation_set_size = x_valid.shape[0]
@@ -32,7 +31,7 @@ class Binner(abc.ABC):
         self.x_valid = tf.constant(x_valid)
         self.contig_ids = contig_ids
         self.name = name
-
+        self.debug = debug
         self.pretraining_params = pretraining_params
         self.clust_params = clust_params
 
@@ -51,7 +50,7 @@ class Binner(abc.ABC):
             dr = self.pretraining_params["drop_and_denoise_rate"]
         else:
             dr = 0
-        self.formatted = f'{self.pretraining_params["num_hidden_layers"]}x{self.pretraining_params["layer_size"]}-{self.pretraining_params["embedding_neurons"]}_Drp:{dr}_Lr:{self.pretraining_params["learning_rate"]}_{time.strftime("run_%d-%H_%M_%S")}'
+        self.formatted = f'{self.pretraining_params["num_hidden_layers"]}x{self.pretraining_params["layer_size"]}-{self.pretraining_params["embedding_neurons"]}_Drp_{dr}_Lr_{self.pretraining_params["learning_rate"]}_{time.strftime("run_%d-%H_%M_%S")}'
         eps = [str(x) for x in self.pretraining_params["epochs"]]
         btch = [str(x) for x in self.pretraining_params["batch_sizes"]]
         extra = f'_Eps[{",".join(eps)}]_Batch[{",".join(btch)}]'
@@ -73,6 +72,7 @@ class Binner(abc.ABC):
 
     def loss_fn(self):
         number_of_samples = self.pretraining_params['number_of_samples']
+        factor = self.pretraining_params['abd_weight']
         def loss(y_pred, y_true):
             s = number_of_samples
             y_true_tnfs = y_true[:, :-s]
@@ -96,8 +96,8 @@ class Binner(abc.ABC):
             # ratio = np.ceil(num_tnfs / s)
             # loss = tnf_err/ s + abd_err
             # loss = (tnf_err / (s + num_tnfs)) + abd_err
-            loss = tnf_err / s + abd_err
-            return loss
+            loss_value = tnf_err/(s*factor) + abd_err
+            return loss_value
         return loss
 
     def sensitivity(self, tnf_feature_size=136, abundance_feature_size=2):
@@ -132,7 +132,7 @@ class Binner(abc.ABC):
         bottom, top = ax.get_ylim()
         ax.set_ylim(bottom + 0.5, top - 0.5)
         # plt.show()
-        plt.savefig('sensitivity.png')
+        plt.savefig(os.path.join(self.log_dir, 'sensitivity.png'))
         return gradients
 
     def get_assignments(self, include_outliers=False):
@@ -156,28 +156,23 @@ class Binner(abc.ABC):
         encoder = keras.Model(input, latent_output, name="encoder")
         return encoder
 
-    def pretraining(self, callbacks):
+    def pretraining(self, callbacks=[]):
 
-        file_writer = tf.summary.create_file_writer(self.log_dir)
+        file_writer = tf.summary.create_file_writer(self.log_dir) if self.debug else None
 
         train_loss = []
         x_train = tf.data.Dataset.from_tensor_slices(self.x_train)
-        train_labels = tf.data.Dataset.from_tensor_slices(self.train_labels)
         validation_loss = 0
-        loss_function = tf.keras.losses.get(self.autoencoder.loss)
         trained_samples = 0
         current_epoch = 0
         random.seed(2)
         epochs = self.pretraining_params['epochs']
-        #epochs.append(1000)
         batch_sizes = self.pretraining_params['batch_sizes']
-        #batch_sizes.append(self.x_train.shape[0])
-        print(epochs, batch_sizes)
+        print(f'Training for {sum(epochs)} epochs')
 
         for epochs_to_run, batch_size in zip(epochs, batch_sizes):
             epoch_seed = random.randint(0, 40000)
             training_set = x_train.shuffle(buffer_size=40000, seed=epoch_seed).repeat().batch(batch_size)
-            #training_labels = train_labels.shuffle(buffer_size=40000, seed=2).repeat().batch(batch_size)
 
             for epoch in range(epochs_to_run):
                 for batch in training_set:
@@ -190,16 +185,12 @@ class Binner(abc.ABC):
                 # Epoch over - get metrics
 
                 mean_train_loss = np.mean(train_loss)
-                if self.x_valid.shape[0] != 0:
-                    reconstruction = self.autoencoder(self.x_valid, training=False)
-                    validation_loss = np.mean(loss_function(reconstruction, self.x_valid))
-                    print(f'Epoch\t{current_epoch + 1}\t\tTraining_loss:{mean_train_loss:.4f}\tValidation_loss:{validation_loss:.4f}')
-                else:
-                    print(
-                        f'Epoch\t{current_epoch + 1}\t\tTraining_loss:{mean_train_loss:.4f}')
-                with file_writer.as_default():
-                    tf.summary.scalar('Training loss', mean_train_loss, step=current_epoch + 1)
-                    tf.summary.scalar('Validation loss', validation_loss, step=current_epoch + 1)
+
+                print(f'Epoch\t{current_epoch + 1}\t\tTraining_loss:{mean_train_loss:.6f}')
+                if self.debug:
+                    with file_writer.as_default():
+                        tf.summary.scalar('Training loss', mean_train_loss, step=current_epoch + 1)
+                        tf.summary.scalar('Validation loss', validation_loss, step=current_epoch + 1)
                 train_loss.clear()
                 if (current_epoch + 1) % self.pretraining_params['callback_interval'] == 0:
                     for callback in callbacks:
@@ -207,7 +198,6 @@ class Binner(abc.ABC):
                 current_epoch += 1
         for callback in callbacks:
             callback.on_train_end()
-        #self.sensitivity()
 
     def include_clustering_loss(self):
         output_of_input = self.autoencoder.layers[0].output
@@ -225,46 +215,6 @@ class Binner(abc.ABC):
         print(rerouted_autoencoder.summary())
         return rerouted_autoencoder
 
-    def final_DBSCAN_clustering(self):
-
-        encoded_data_full = self.encoder.predict(self.feature_matrix)
-
-        hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=self.clust_params['min_cluster_size'], min_samples=self.clust_params['min_samples'], core_dist_n_jobs=36)
-        all_assignments = hdbscan_instance.fit_predict(encoded_data_full)
-        print("Final clustering...")
-        enc = self.encoder.predict(self.feature_matrix)
-
-        '''
-        batch_centroids = []
-        centroid_dict = {}
-        final_assignments = all_assignments.copy()
-        for cluster_label in set(all_assignments):
-            # if outlier
-            if cluster_label == -1:
-                continue
-
-            cluster_mask = (all_assignments == cluster_label)
-            encoded_cluster = enc[cluster_mask]
-            centroid = np.mean(encoded_cluster, axis=0)
-            centroid_dict[cluster_label] = centroid
-
-        centroids = np.vstack(list(centroid_dict.values()))
-
-        for index, (contig, cluster_label) in enumerate(zip(enc, all_assignments)):
-            if cluster_label == -1:
-                dists = np.sqrt(np.sum(((centroids - contig) ** 2), axis=1))
-                shortest_dist = np.argmin(dists)
-
-                batch_centroids.append(centroid_dict[shortest_dist])
-                final_assignments[index] = shortest_dist
-
-
-        print("Binning complete.")
-
-        print(f'final clusters {Counter(final_assignments)}')
-        return final_assignments
-        '''
-        return all_assignments
 
     def save_params(self):
         path = os.path.join(self.log_dir,'training_config.json')
@@ -280,10 +230,10 @@ class Binner(abc.ABC):
 class Stacked_Binner(Binner):
 
     def __init__(self, name, contig_ids, feature_matrix, labels=None, x_train=None,
-                 x_valid=None, train_labels=None,validation_labels=None, pretraining_params=None, clust_params=None):
+                 x_valid=None, train_labels=None,validation_labels=None, pretraining_params=None, clust_params=None, debug=False):
         super().__init__(name=name, contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels,
                          x_train=x_train, x_valid=x_valid, train_labels=train_labels, valid_labels=validation_labels,
-                         pretraining_params=pretraining_params, clust_params=clust_params)
+                         pretraining_params=pretraining_params, clust_params=clust_params, debug=debug)
 
     def create_autoencoder(self):
         # get params from param dict
@@ -362,8 +312,8 @@ class Stacked_Binner(Binner):
 
 
 
-        #stacked_ae.compile(optimizer=optimizer, loss=self.loss_fn())
-        stacked_ae.compile(optimizer=optimizer, loss='mae')
+        stacked_ae.compile(optimizer=optimizer, loss=self.loss_fn())
+        #stacked_ae.compile(optimizer=optimizer, loss='mae')
         print(stacked_ae.summary())
         self.autoencoder = stacked_ae
         self.encoder = self.extract_encoder()
@@ -374,41 +324,47 @@ class Stacked_Binner(Binner):
         if cluster_model:
             self.autoencoder = tf.keras.models.load_model('autoencoder', custom_objects={"GaussianLoss": GaussianLoss})
         else:
-            self.autoencoder = tf.keras.models.load_model('STACKED_Epoch_5000')
+            self.autoencoder = tf.keras.models.load_model('autoencoder')
         self.encoder = self.extract_encoder()
         print("Model loaded")
 
     def do_binning(self, load_model=False, load_clustering_AE=True):
-        self.save_params()
-        '''Method is ALMOST identical to Sparse_AE... uses Stacked AE instead'''
-        if load_model:
-            self.load_model()
+        if self.debug:
 
+            self.save_params()
+            '''Method is ALMOST identical to Sparse_AE... uses Stacked AE instead'''
+            if load_model:
+                self.load_model()
+
+            else:
+                self.autoencoder = self.create_autoencoder()
+                self.encoder = self.extract_encoder()
+                print(self.encoder)
+                callback_projector = ProjectEmbeddingCallback(binner=self)
+                callback_activity = ActivityCallback(binner=self)
+                callback_results = WriteBinsCallback(binner=self)
+
+                self.pretraining(callbacks=[callback_projector, callback_activity, callback_results])
+
+            if load_clustering_AE:
+                self.load_model(cluster_model=True)
+            else:
+                #self.autoencoder = self.include_clustering_loss()
+                #self.encoder = self.extract_encoder()
+                #callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
+                #callback_projector.prefix_name = 'DeepClustering_'
+                #self.fit_clustering([callback_results])
+                print("Completing...")
         else:
             self.autoencoder = self.create_autoencoder()
             self.encoder = self.extract_encoder()
-            print(self.encoder)
-            callback_projector = ProjectEmbeddingCallback(binner=self)
-            callback_activity = ActivityCallback(binner=self)
-            callback_results = WriteBinsCallback(binner=self)
-
-            self.pretraining(callbacks=[callback_projector, callback_activity, callback_results])
-
-        if load_clustering_AE:
-            self.load_model(cluster_model=True)
-        else:
-            #self.autoencoder = self.include_clustering_loss()
-            #self.encoder = self.extract_encoder()
-            #callback_results = WriteBinsCallback(binner=self, clustering_ae=True)
-            #callback_projector.prefix_name = 'DeepClustering_'
-            #self.fit_clustering([callback_results])
-            print("Completing...")
-
-        return self.bins
+            self.pretraining()
+            run_hdbscan(self)
+            return self.bins
 
     def fit_clustering_backup(self, callbacks):
         file_writer = tf.summary.create_file_writer(self.log_dir)
-        x = self.feature_matrix
+        x = self.x_train
         eps = self.clust_params['eps']
         best_loss = 1e10
         no_improvemnt_epochs = 0
@@ -493,16 +449,16 @@ class Stacked_Binner(Binner):
 
     def fit_clustering(self, callbacks):
         file_writer = tf.summary.create_file_writer(self.log_dir)
-        x = self.feature_matrix
+        x = self.x_train
+        epochs = self.clust_params['epochs']
         eps = self.clust_params['eps']
         best_loss = 1e10
         no_improvemnt_epochs = 0
-        optimizer_weights = getattr(self.autoencoder.optimizer, 'weights')
+        #optimizer_weights = getattr(self.autoencoder.optimizer, 'weights')
         min_samples = self.clust_params['min_samples']
-        epochs = self.clust_params['epochs']
-
-        optimizer = tf.keras.optimizers.Adam(self.clust_params['learning_rate'])
-        optimizer.set_weights(optimizer_weights)
+        optimizer = self.autoencoder.optimizer
+        #optimizer = tf.keras.optimizers.Adam(self.clust_params['learning_rate'])
+        #optimizer.set_weights(optimizer_weights)
         for epoch in range(epochs):
             print(f'Current epoch: {epoch + 1} of total epochs: {epochs}')
 
@@ -561,13 +517,13 @@ class Stacked_Binner(Binner):
 
                 # Reconstruction loss
                 reconstructed = self.autoencoder(x, training=True)
-                reconstruction_loss = self.clust_params['loss_weights'][0] * tf.reduce_mean(tf.keras.losses.get(self.clust_params['reconst_loss'])(reconstructed, x))
+                reconstruction_loss = self.clust_params['loss_weights'][0] * self.loss_fn()(reconstructed, x)
 
                 # Clustering loss
                 dists = tf.reduce_sum(((encoded_data_full - centroids_of_assignments_tensor) ** 2), axis=1)
 
                 gaussian_weights = tf.exp(-dists / (2 * variances_of_assignments_tensor))
-                clustering_loss = tf.reduce_mean(gaussian_weights * dists) * self.clust_params['loss_weights'][1]
+                clustering_loss = (gaussian_weights * dists) * self.clust_params['loss_weights'][1]
 
                 loss = tf.add_n([reconstruction_loss + clustering_loss] + self.autoencoder.losses)
 
@@ -583,16 +539,16 @@ class Stacked_Binner(Binner):
             print(Counter(all_assignments))
             no_clusters = max(all_assignments)
             print(f'No. clusters: {no_clusters}')
-
-
-            combined_loss = self.clust_params['loss_weights'][0] * reconstruction_loss + self.clust_params['loss_weights'][1] * clustering_loss
+            weighted_reconstruction_loss = self.clust_params['loss_weights'][0] * np.mean(reconstruction_loss)
+            weighted_clustering_loss = self.clust_params['loss_weights'][1] * np.mean(clustering_loss)
+            combined_loss = weighted_reconstruction_loss + weighted_clustering_loss
 
 
             print(
-                f'Epoch\t{epoch + 1}\t\tReconstruction_loss:{reconstruction_loss:.4f}\tClustering_loss:{clustering_loss:.4f}\tTotal_loss:{combined_loss:.4f}')
+                f'Epoch\t{epoch + 1}\t\tReconstruction_loss:{weighted_reconstruction_loss:.4f}\tClustering_loss:{weighted_clustering_loss:.4f}\tTotal_loss:{combined_loss:.4f}')
             with file_writer.as_default():
-                tf.summary.scalar('DC_Reconstruction loss', reconstruction_loss, step=epoch + 1)
-                tf.summary.scalar('DC_Clustering loss', clustering_loss, step=epoch + 1)
+                tf.summary.scalar('DC_Reconstruction loss', weighted_reconstruction_loss, step=epoch + 1)
+                tf.summary.scalar('DC_Clustering loss', weighted_clustering_loss, step=epoch + 1)
                 tf.summary.scalar('DC_Total loss', combined_loss, step=epoch + 1)
             if combined_loss < best_loss:
                 best_loss = combined_loss
@@ -604,7 +560,7 @@ class Stacked_Binner(Binner):
                 no_improvemnt_epochs += 1
             if (epoch + 1) % self.clust_params['callback_interval'] == 0:
                 for callback in callbacks:
-                    callback.on_epoch_end(epoch + 1, logs=all_assignments)
+                    callback.on_epoch_end(epoch + 1)
             if no_improvemnt_epochs >= 100:
                 break
         for callback in callbacks:
@@ -677,33 +633,9 @@ class Sparse_Binner(Stacked_Binner):
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
-        def loss_fn(y_pred, y_true):
-            s = 5
-            y_true_tnfs = y_true[:, :-s]
-            y_true_abd = y_true[:, -s:]
 
-            y_pred_tnfs = y_pred[:, :-s]
-            y_pred_abd = y_pred[:, -s:]
 
-            # TNF error
-            #tnf_diff = tf.abs(y_true_tnfs - y_pred_tnfs)
-
-            #tnf_err = tf.reduce_mean(tf.reduce_sum(tnf_diff, axis=1))
-            tnf_err = tf.losses.MAE(y_pred_tnfs, y_true_tnfs)
-
-            # ABUNDANCE error
-            #abd_diff = tf.abs(y_true_abd - y_pred_abd)
-            #abd_err = tf.reduce_mean(tf.reduce_sum(abd_diff, axis=1))
-            abd_err = tf.losses.MAE(y_pred_abd, y_true_abd)
-            # total_abd_err = tf.reduce_sum(-(tf.math.log(y_pred_abd + 1e-9)) * y_true_abd, axis=1)
-
-            # ratio = np.ceil(num_tnfs / s)
-            # loss = tnf_err/ s + abd_err
-            # loss = (tnf_err / (s + num_tnfs)) + abd_err
-            loss = tnf_err/s + abd_err
-            return loss
-
-        stacked_ae.compile(optimizer=optimizer, loss=loss_fn)
+        stacked_ae.compile(optimizer=optimizer, loss=self.loss_fn())
 
         print(stacked_ae.summary())
 
@@ -761,11 +693,11 @@ class Contractive_Binner(Stacked_Binner):
             self.autoencoder = tf.keras.models.load_model('autoencoder.h5')
         else:
             self.autoencoder = self.create_autoencoder()
-            callback_projector = ProjectEmbeddingCallback(binner=self)
+            #callback_projector = ProjectEmbeddingCallback(binner=self)
             callback_results = WriteBinsCallback(binner=self)
             callback_activity = ActivityCallback(binner=self)
 
-            self.pretraining(callbacks=[callback_activity, callback_projector, callback_results])
+            self.pretraining(callbacks=[callback_activity, callback_results])
 
         self.encoder = self.extract_encoder()
 
@@ -803,7 +735,7 @@ class Contractive_Binner(Stacked_Binner):
 
 
         def loss_fn(y_pred, y_true):
-            s = 5
+            s = self.pretraining_params['number_of_samples']
             y_true_tnfs = y_true[:, :-s]
             y_true_abd = y_true[:, -s:]
 
@@ -825,8 +757,8 @@ class Contractive_Binner(Stacked_Binner):
             # ratio = np.ceil(num_tnfs / s)
             # loss = tnf_err/ s + abd_err
             # loss = (tnf_err / (s + num_tnfs)) + abd_err
-            loss = tnf_err/s + abd_err
-            return loss
+            loss_value = tnf_err/(s*self.pretraining_params['abd_weight']) + abd_err
+            return loss_value
 
         file_writer = tf.summary.create_file_writer(self.log_dir)
         jacobian_losses = []
@@ -897,7 +829,7 @@ class Contractive_Binner(Stacked_Binner):
             callback.on_train_end()
 
     def fit_dbscan(self, callbacks):
-        x = self.feature_matrix
+        x = self.x_train
         y = self.labels
         batch_size = self.clust_params['batch_size']
         epochs = self.clust_params['epochs']
@@ -1071,13 +1003,20 @@ class KLDivergenceRegularizer(tf.keras.regularizers.Regularizer):
         return {"weight" : self.weight, "target" : self.target}
 
 
+def run_hdbscan(binner):
+    embedding = binner.encoder.predict(binner.x_train)
+    hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=binner.clust_params['min_cluster_size'],
+                                       min_samples=binner.clust_params['min_samples'], core_dist_n_jobs=-1,
+                                       metric='euclidean')
+    all_assignments = hdbscan_instance.fit_predict(embedding)
+    binner.bins = all_assignments
 
 def create_binner(binner_type, contig_ids, feature_matrix, labels=None, x_train=None, x_valid=None, train_labels=None,
-                  validation_labels=None, pretraining_params=None, clust_params=None):
+                  validation_labels=None, pretraining_params=None, clust_params=None, debug=False):
     binner = binner_dict[binner_type]
 
     binner_instance = binner(name=binner_type, contig_ids=contig_ids, feature_matrix=feature_matrix, labels=labels,
-                                  x_train=x_train, x_valid=x_valid,train_labels=train_labels, validation_labels=validation_labels, pretraining_params=pretraining_params, clust_params=clust_params)
+                                  x_train=x_train, x_valid=x_valid,train_labels=train_labels, validation_labels=validation_labels, pretraining_params=pretraining_params, clust_params=clust_params, debug=False)
     return binner_instance
 
 
@@ -1094,13 +1033,16 @@ class ProjectEmbeddingCallback(tf.keras.callbacks.Callback):
         self.embeddings = []
 
     def on_epoch_end(self, epoch, logs=None):
-        print("Entered project callback")
-        embeddings = self.binner.encoder(self.binner.x_train)
-        data_to_project = self.project_data(embedding=embeddings, epoch=epoch)
-        print("Ran project data")
+
+        embedding_mean_substracted_unit_norm = self.binner.encoder.predict(self.binner.x_train)
+        embedding_mean = np.mean(embedding_mean_substracted_unit_norm, axis=0)
+        embedding_mean_substracted_unit_norm -= embedding_mean
+        embedding_mean_substracted_unit_norm = normalize(embedding_mean_substracted_unit_norm, axis=1, norm='l2')
+
+        data_to_project = self.project_data(embedding=embedding_mean_substracted_unit_norm, epoch=epoch)
         data_variable = tf.Variable(data_to_project, name=f'{self.prefix_name}epoch{epoch}')
-        print("created embedding data")
         self.embeddings.append(data_variable)
+
     def on_train_end(self, logs=None):
         config = projector.ProjectorConfig()
         if len(self.embeddings) != 0:
@@ -1122,7 +1064,7 @@ class ProjectEmbeddingCallback(tf.keras.callbacks.Callback):
         # bins_atleast_10_contigs = [key for key, val in counter.items() if val >= 10]
 
         sorted_by_count = sorted(list(counter.items()), key=lambda x: x[1], reverse=True)
-        samples_of_bins = [fst for fst, snd in sorted_by_count[:20]]
+        samples_of_bins = [fst for fst, snd in sorted_by_count[1:11]]
         # samples_of_bins = random.choices(bins_atleast_10_contigs, k=bins_to_plot)
 
         if run_on_all_data:
@@ -1153,13 +1095,6 @@ class ProjectEmbeddingCallback(tf.keras.callbacks.Callback):
                             f.write(f'{bin_id}\n')
 
             data_to_project = embedding[mask]
-            #pca = decomposition.PCA(n_components=number_components)
-            #pca.fit(data_to_project)
-            #data_to_project = pca.transform(data_to_project)
-            #sns.scatterplot(data_to_project[:, 0], data_to_project[:, 1])
-            #plt.show()
-
-        #variance_of_components = pca.explained_variance_ratio_
 
         return data_to_project
 
@@ -1229,13 +1164,26 @@ class WriteBinsCallback(tf.keras.callbacks.Callback):
         if logs is not None:
             all_assignments = logs
         else:
-            data = self.binner.encoder.predict(self.binner.x_train)
-            hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=self.binner.clust_params['min_cluster_size'], min_samples=self.binner.clust_params['min_samples'], core_dist_n_jobs=36)
-            all_assignments = hdbscan_instance.fit_predict(data)
+            # Test
+            embedding = self.binner.encoder.predict(self.binner.x_train)
+            embedding_mean = np.mean(embedding, axis=0)
+            embedding -= embedding_mean
+            normalized_embedding = normalize(embedding, axis=1, norm='l2')
+
+            hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=self.binner.clust_params['min_cluster_size'], min_samples=self.binner.clust_params['min_samples'], core_dist_n_jobs=-1, metric='euclidean')
+            all_assignments = hdbscan_instance.fit_predict(normalized_embedding)
             self.binner.bins = all_assignments
             bins_without_outliers = self.binner.get_assignments(include_outliers=False)
-            #Her
             data_processor.write_bins_to_file(bins_without_outliers, output_dir=os.path.join(self.binner.log_dir, f'{self.prefix}_Ep:{epoch}_{self.binner.formatted}_'))
+
+            # Original
+            #data = self.binner.encoder.predict(self.binner.x_train)
+            #hdbscan_instance = hdbscan.HDBSCAN(min_cluster_size=self.binner.clust_params['min_cluster_size'], min_samples=self.binner.clust_params['min_samples'], core_dist_n_jobs=-1)
+            #all_assignments = hdbscan_instance.fit_predict(data)
+            #self.binner.bins = all_assignments
+            #bins_without_outliers = self.binner.get_assignments(include_outliers=False)
+
+            #data_processor.write_bins_to_file(bins_without_outliers, output_dir=os.path.join(self.binner.log_dir, f'{self.prefix}_Ep:{epoch}_{self.binner.formatted}_'))
 
             #self.binner.autoencoder.save(os.path.join(self.binner.log_dir, f'{self.prefix}Epoch_{epoch}'))
 
