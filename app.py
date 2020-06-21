@@ -68,15 +68,15 @@ def run_on_windows(config, pretraining_params, clust_param):
     if config:
         pretraining_params, clustering_params = load_training_config(config)
 
-    dataset_path = '/home/lasse/datasets/cami_high'
+    dataset_path = 'D:\\datasets\\cami_airways'
     #dataset_path = 'D:/datasets/cami_medium'
     tnfs, contig_ids, depth = data_processor.load_data_local(dataset_path)
     pretraining_params['number_of_samples'] = depth.shape[1]
     print(pretraining_params['number_of_samples'])
-    ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
-        os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
-    labels = list(contig_id_binid_sorted.values())
-    #labels = []
+    #ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
+    #    os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
+    #labels = list(contig_id_binid_sorted.values())
+    labels = []
     feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels, use_validation_data=False)
 
     binner_instance = newBinners.create_binner(binner_type='SPARSE', feature_matrix=feature_matrix,

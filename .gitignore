@@ -164,6 +164,12 @@ lassetest.py
 
 latent.npz
 
-Sanity.py
-
 Logs/
+
+Evaluate_embedding/
+
+autoencoder_SPARSE/
+
+cami_airways_x_train.npy
+
+cami_high_x_train.npy

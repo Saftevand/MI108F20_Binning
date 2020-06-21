@@ -324,7 +324,7 @@ class Stacked_Binner(Binner):
         if cluster_model:
             self.autoencoder = tf.keras.models.load_model('autoencoder', custom_objects={"GaussianLoss": GaussianLoss})
         else:
-            self.autoencoder = tf.keras.models.load_model('autoencoder')
+            self.autoencoder = tf.keras.models.load_model('autoencoder_STACKED')
         self.encoder = self.extract_encoder()
         print("Model loaded")
 
@@ -344,8 +344,9 @@ class Stacked_Binner(Binner):
                 callback_activity = ActivityCallback(binner=self)
                 callback_results = WriteBinsCallback(binner=self)
 
-                self.pretraining(callbacks=[callback_projector, callback_activity, callback_results])
-
+                self.pretraining(callbacks=[])
+                np.save(f'embedding_{self.name}', self.encoder.predict(self.x_train))
+                print("saved_embedding")
             if load_clustering_AE:
                 self.load_model(cluster_model=True)
             else:
@@ -356,10 +357,15 @@ class Stacked_Binner(Binner):
                 #self.fit_clustering([callback_results])
                 print("Completing...")
         else:
+            if load_model:
+                 self.load_model()
             self.autoencoder = self.create_autoencoder()
             self.encoder = self.extract_encoder()
             self.pretraining()
-            run_hdbscan(self)
+            np.save(f'embedding_{self.name}', self.encoder.predict(self.x_train))
+            self.autoencoder.save(f'autoencoder_{self.name}')
+            print("saved_embedding")
+            #run_hdbscan(self)
             return self.bins
 
     def fit_clustering_backup(self, callbacks):
@@ -642,7 +648,7 @@ class Sparse_Binner(Stacked_Binner):
         return stacked_ae
 
     def load_model(self):
-        self.autoencoder = tf.keras.models.load_model('autoencoder.h5', custom_objects={
+        self.autoencoder = tf.keras.models.load_model('autoencoder_SPARSE', custom_objects={
             "KLDivergenceRegularizer": KLDivergenceRegularizer})
         self.encoder = self.extract_encoder()
         print("Model loaded")

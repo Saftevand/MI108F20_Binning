@@ -6,6 +6,7 @@ import newBinners
 import os
 import matplotlib
 matplotlib.use('Agg')
+import numpy as np
 
 pretrain_params = {
         'learning_rate': 0.001,
@@ -28,8 +29,8 @@ pretrain_params = {
         'sparseKLweight': 0.1,
         'sparseKLtarget': 0.05,
         'jacobian_weight': 1e-3,
-        'callback_interval': 100,
-        'abd_weight': 40
+        'callback_interval': 500,
+        'abd_weight': 2
     }
 clust_params = {
     'learning_rate': 0.001,
@@ -53,21 +54,21 @@ def run_on_windows(config, pretraining_params, clust_param):
 
     pretraining_params = pretraining_params
     clustering_params = clust_param
+    print(pretrain_params['epochs'])
 
     if config:
         pretraining_params, clustering_params = load_training_config(config)
 
-    dataset_path = '/home/lasse/datasets/cami_high'
-    #dataset_path = 'D:/datasets/cami_medium'
+    dataset_path = 'D:\\datasets\\cami_high'
     tnfs, contig_ids, depth = data_processor.load_data_local(dataset_path)
     pretraining_params['number_of_samples'] = depth.shape[1]
     print(pretraining_params['number_of_samples'])
-    ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
-        os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
-    labels = list(contig_id_binid_sorted.values())
-    #labels = []
+    #ids, contig_ids2, contigid_to_binid, contig_id_binid_sorted = data_processor.get_cami_data_truth(
+    #    os.path.join(dataset_path, 'gsa_mapping_pool.binning'))
+    #labels = list(contig_id_binid_sorted.values())
+    labels = []
     feature_matrix, x_train, x_valid, train_labels, validation_labels = data_processor.preprocess_data(tnfs=tnfs, depths=depth, labels=labels, use_validation_data=False)
-
+    #np.save('cami_airways_x_train.npy', x_train)
     binner_instance = newBinners.create_binner(binner_type='SPARSE', feature_matrix=feature_matrix,
                                                contig_ids=contig_ids, labels=labels, x_train=x_train, x_valid=x_valid ,train_labels=train_labels, validation_labels=validation_labels, clust_params=clustering_params, pretraining_params=pretraining_params)
 
@@ -124,4 +125,5 @@ def handle_input_arguments():
 
 if __name__ == '__main__':
     _multiprocessing.freeze_support()  # Skal være her så længe at vi bruger vambs metode til at finde depth
-    main()
+    #main()
+    run_on_windows(None, pretrain_params, clust_params)
