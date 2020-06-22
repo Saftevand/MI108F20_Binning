@@ -173,3 +173,5 @@ autoencoder_SPARSE/
 cami_airways_x_train.npy
 
 cami_high_x_train.npy
+
+Embedding_cluster_tests/

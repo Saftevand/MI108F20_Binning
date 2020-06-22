@@ -4,6 +4,13 @@ import numpy as np
 import tensorflow as tf
 import seaborn as sns
 import matplotlib.pyplot as plt
+import joblib
+import hdbscan
+from sklearn.preprocessing import MinMaxScaler
+
+
+mem_path = 'D:\\datasets\\temp'
+
 pretrain_params = {
         'learning_rate': 0.001,
         'reconst_loss': 'mae',
@@ -57,6 +64,26 @@ class KLDivergenceRegularizer(tf.keras.regularizers.Regularizer):
     def get_config(self):
         return {"weight" : self.weight, "target" : self.target}
 
+def do_clustering(embedding, contig_ids, normalize=True):
+    mem = joblib.Memory(location=mem_path)
+    min_samples = 10
+    min_cluster = 50
+    ae_type = "SPARSE"
+    dataset = "high"
+    normalize_str = f'normalize_{str(normalize)}'
+    if normalize:
+        scaler = MinMaxScaler()
+        embedding = scaler.fit_transform(embedding)
+    min_clust_values = [10,20,30,40,50]
+    clusterer = hdbscan.HDBSCAN(min_samples=min_samples,min_cluster_size=50, memory=mem).fit(embedding)
+    for i in min_clust_values:
+        prefix = f'{ae_type}_{dataset}_{normalize_str}_ms{min_samples}_mc{i}'
+        clusterer = hdbscan.HDBSCAN(min_samples=min_samples,min_cluster_size=i,
+        memory=mem).fit(embedding)
+        labels = clusterer.labels_
+
+        bins = get_assignments(labels, contig_ids)
+        write_bins_to_file(bins=bins, prefix=prefix)
 
 
 
@@ -72,18 +99,23 @@ def sensitivity(embedding_matrix, loss, x_train, decoder, tnf_feature_size=136, 
     gradients = tf.reduce_mean(tf.abs(gradients), 0)
     number_of_features = embedding_matrix.shape[1]
 
-    dimensions = [f'D{e}' for e in range(1, number_of_features + 1)]
+
     #tnf_feature = [f'TNF\n{e}' for e in range(1, tnf_feature_size + 1)]
     #abundance_feature = [f'ABD\n{e}' for e in range(1, number_of_features - (tnf_feature_size - 1))]
     shape = int(np.ceil(np.sqrt(number_of_features)))
-    labels = dimensions
-    labels += list(range(0, (shape * shape) - number_of_features))
+
     mask = np.zeros(shape * shape, dtype=bool)
     for index in range(number_of_features, shape * shape):
         mask[index] = True
     mask = mask.reshape(shape, shape)
-    labels = np.asarray(labels).reshape(shape, shape)
+
     gradient_list = np.asarray(gradients.numpy()).tolist()
+    sum_gradients_percentage =100 / np.sum(gradient_list)
+    dimensions = [f'D{e}\n{(sum_gradients_percentage*gradient_list[e-1]):.2f}%' for e in range(1, number_of_features + 1)]
+    labels = dimensions
+    labels += list(range(0, (shape * shape) - number_of_features))
+    labels = np.asarray(labels).reshape(shape, shape)
+
     max_gradient = max(gradient_list)
     min_gradient = min(gradient_list)
     for _ in range((shape * shape) - number_of_features):
@@ -99,7 +131,7 @@ def sensitivity(embedding_matrix, loss, x_train, decoder, tnf_feature_size=136, 
 
 
 def loss(y_pred, y_true):
-    s = 10
+    s = 5
     y_true_tnfs = y_true[:, :-s]
     y_true_abd = y_true[:, -s:]
 
@@ -125,15 +157,53 @@ def loss(y_pred, y_true):
     return loss_value
 
 
-embedding_stacked_high = np.load('Evaluate_embedding\\stacked_high\\embedding_STACKED.npy')
-embedding_stacked_airways = np.load('Evaluate_embedding\\stacked_airways\\embedding_STACKED.npy')
+def get_assignments(labels, contig_ids, include_outliers=False):
+
+    if include_outliers is False:
+        outlier_mask = (labels != -1)
+    else:
+        outlier_mask = np.ones(len(labels), dtype=bool)
+
+    try:
+        bins = np.vstack([contig_ids[outlier_mask], labels[outlier_mask]])
+    except:
+        print('Could not combine contig ids with bin assignment')
+        print('\nContig IDs:', contig_ids, '\nBins:', labels)
+    return bins
+
+
+def write_bins_to_file(bins, prefix):
+
+    output_string = '@Version:0.9.1\n@SampleID:gsa\n\n@@SEQUENCEID\tBINID\tLENGTH\n'
+
+    for i in range(0, len(bins[0])):
+
+        output_string += f'{bins[0][i]}\t{bins[1][i]}\n'
+
+    with open(f'Embedding_cluster_tests\\{prefix}_binning_results.tsv', 'w') as output:
+        output.write(output_string)
+
+
+
+#embedding_stacked_high = np.load('Evaluate_embedding\\stacked_high\\embedding_STACKED.npy')
+#embedding_stacked_airways = np.load('Evaluate_embedding\\stacked_airways\\embedding_STACKED.npy')
 embedding_sparse_high = np.load('Evaluate_embedding\\sparse_high\\embedding_SPARSE.npy')
-embedding_sparse_airways = np.load('Evaluate_embedding\\sparse_airways\\embedding_SPARSE.npy')
+#embedding_sparse_airways = np.load('Evaluate_embedding\\sparse_airways\\embedding_SPARSE.npy')
+
+contig_ids_high = np.load('D:\\datasets\\cami_high\\contig_ids_high.npy')
+#contig_ids_airways = np.load('D:\\datasets\\cami_airways\\contig_ids_high.npy')
+
+labels = do_clustering(embedding=embedding_sparse_high, contig_ids=contig_ids_high)
+#bins = get_assignments(labels, contig_ids_high, include_outliers=False)
+#write_bins_to_file(bins)
+
+
+
 
 x_train_airways = np.load('Evaluate_embedding\\cami_airways_x_train.npy')
 x_train_high = np.load('Evaluate_embedding\\cami_high_x_train.npy')
 
-
+'''
 embedding_stacked_high_mean = np.mean(embedding_stacked_high,axis=0)
 embedding_stacked_airways_mean = np.mean(embedding_stacked_airways, axis=0)
 embedding_sparse_high_mean = np.mean(embedding_sparse_high,axis=0)
@@ -156,7 +226,7 @@ matrix_of_means = np.transpose(np.vstack([embedding_stacked_high_std, embedding_
 
 results = np.transpose(np.abs(matrix_of_means - results_mean))
 
-model = tf.keras.models.load_model('Evaluate_embedding\\stacked_airways\\autoencoder_STACKED', compile=False)
+model = tf.keras.models.load_model('Evaluate_embedding\\stacked_high\\autoencoder_STACKED', compile=False)
 #tf.keras.regularizers.KLDivergenceRegularizer = KLDivergenceRegularizer
 #model = tf.keras.models.load_model('Evaluate_embedding\\sparse_high\\autoencoder_SPARSE', compile=False, custom_objects={
 #            "KLDivergenceRegularizer": KLDivergenceRegularizer})
@@ -173,8 +243,8 @@ for layer in model.layers[-4:]:
 decoder = tf.keras.Model(input, temp, name="Decoder")
 print(decoder.summary())
 
-sensitivity(embedding_matrix=embedding_stacked_airways,loss=loss, x_train=x_train_airways,decoder=decoder, abundance_feature_size=None, tnf_feature_size=None)
-
+sensitivity(embedding_matrix=embedding_stacked_high,loss=loss, x_train=x_train_high,decoder=decoder, abundance_feature_size=None, tnf_feature_size=None)
+'''
 
 
 
